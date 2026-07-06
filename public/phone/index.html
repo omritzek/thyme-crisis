@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Light Gun — Phone</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    background: #000;
+    color: #eee;
+    font-family: -apple-system, Helvetica, Arial, sans-serif;
+    overscroll-behavior: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  .screen {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 18px;
+    padding: 24px;
+    box-sizing: border-box;
+    text-align: center;
+  }
+  .hidden { display: none !important; }
+
+  h1 { font-size: 20px; font-weight: 500; color: #ccc; margin: 0; }
+
+  #sessionInput {
+    font-size: 32px;
+    letter-spacing: 8px;
+    text-align: center;
+    width: 220px;
+    padding: 10px;
+    text-transform: uppercase;
+    border-radius: 8px;
+    border: 1px solid #444;
+    background: #1a1a1a;
+    color: #fff;
+  }
+  button {
+    font-size: 18px;
+    padding: 12px 28px;
+    border-radius: 8px;
+    border: none;
+    background: #00b894;
+    color: #fff;
+    font-weight: 600;
+  }
+  button:disabled {
+    background: #444;
+    color: #999;
+  }
+  #joinError, #statusError {
+    color: #ff6b6b;
+    font-size: 14px;
+    min-height: 18px;
+  }
+
+  #cameraContainer {
+    position: fixed;
+    inset: 0;
+    background: #000;
+    display: none;
+  }
+  #cam {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    background: #000;
+  }
+  #overlay {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+  }
+  #fireCatcher {
+    position: absolute;
+    inset: 0;
+  }
+  #startBtn {
+    position: absolute;
+    left: 50%;
+    bottom: 48px;
+    transform: translateX(-50%);
+  }
+</style>
+</head>
+<body>
+
+  <div id="screenJoin" class="screen">
+    <h1>Join a Light Gun session</h1>
+    <input id="sessionInput" maxlength="4" placeholder="CODE" autocapitalize="characters" autocomplete="off" autocorrect="off">
+    <button id="joinBtn">Join</button>
+    <div id="joinError"></div>
+  </div>
+
+  <div id="screenStatus" class="screen hidden">
+    <h1 id="statusText">Connecting…</h1>
+    <div id="statusError"></div>
+    <button id="retryBtn" class="hidden">Back</button>
+  </div>
+
+  <div id="cameraContainer">
+    <video id="cam" playsinline autoplay muted></video>
+    <canvas id="overlay"></canvas>
+    <div id="fireCatcher"></div>
+    <button id="startBtn" disabled>Detecting markers… (0/4)</button>
+  </div>
+
+  <script src="/shared/protocol.js"></script>
+  <script src="/phone/phone.js"></script>
+</body>
+</html>

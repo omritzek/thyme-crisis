@@ -1,0 +1,132 @@
+const path = require('path');
+const http = require('http');
+const express = require('express');
+const QRCode = require('qrcode');
+const { WebSocketServer } = require('ws');
+
+const PORT = process.env.PORT || 3000;
+const SESSION_RE = /^[A-Z0-9]{4}$/;
+
+const app = express();
+const server = http.createServer(app);
+
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/display/index.html'));
+});
+
+app.get('/phone', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/phone/index.html'));
+});
+
+// Renders a QR code for a given piece of text server-side, since the QR
+// library ships no browser bundle. The session code itself is still
+// generated client-side by the display page.
+app.get('/api/qrcode', async (req, res) => {
+  const text = req.query.text;
+  if (!text || typeof text !== 'string') {
+    res.status(400).json({ error: 'missing text query param' });
+    return;
+  }
+  try {
+    const dataUrl = await QRCode.toDataURL(text, { margin: 1, width: 240 });
+    res.json({ dataUrl });
+  } catch (err) {
+    res.status(500).json({ error: 'failed to render qr code' });
+  }
+});
+
+app.use(express.static(path.join(__dirname, '../public')));
+
+// --- WebSocket relay ---
+// Rooms are keyed by 4-char session code. Each room holds at most one
+// display socket and one phone socket. The server only relays app-level
+// messages between the two peers in a room; it never inspects game state.
+
+const rooms = new Map(); // session -> { display: ws|null, phone: ws|null }
+
+function getRoom(session) {
+  let room = rooms.get(session);
+  if (!room) {
+    room = { display: null, phone: null };
+    rooms.set(session, room);
+  }
+  return room;
+}
+
+function cleanupRoom(session) {
+  const room = rooms.get(session);
+  if (room && !room.display && !room.phone) {
+    rooms.delete(session);
+  }
+}
+
+function otherRole(role) {
+  return role === 'display' ? 'phone' : 'display';
+}
+
+function send(ws, msg) {
+  if (ws && ws.readyState === ws.OPEN) {
+    ws.send(JSON.stringify(msg));
+  }
+}
+
+const wss = new WebSocketServer({ server });
+
+wss.on('connection', (ws, req) => {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const role = url.searchParams.get('role');
+  const session = (url.searchParams.get('session') || '').toUpperCase();
+
+  if ((role !== 'display' && role !== 'phone') || !SESSION_RE.test(session)) {
+    send(ws, { type: 'session_error', reason: 'invalid role or session code' });
+    ws.close();
+    return;
+  }
+
+  const room = getRoom(session);
+
+  if (room[role]) {
+    send(ws, { type: 'session_error', reason: 'that role is already connected for this session' });
+    ws.close();
+    return;
+  }
+
+  room[role] = ws;
+  ws.session = session;
+  ws.role = role;
+
+  const peer = room[otherRole(role)];
+  if (peer) {
+    if (role === 'phone') {
+      send(peer, { type: 'phone_connected' });
+    } else {
+      send(peer, { type: 'display_connected' });
+    }
+  }
+
+  ws.on('message', (data) => {
+    let msg;
+    try {
+      msg = JSON.parse(data);
+    } catch (err) {
+      return;
+    }
+    const target = room[otherRole(ws.role)];
+    send(target, msg);
+  });
+
+  ws.on('close', () => {
+    const current = rooms.get(ws.session);
+    if (!current) return;
+    if (current[ws.role] === ws) {
+      current[ws.role] = null;
+    }
+    const remainingPeer = current[otherRole(ws.role)];
+    send(remainingPeer, { type: 'peer_disconnected' });
+    cleanupRoom(ws.session);
+  });
+});
+
+server.listen(PORT, () => {
+  console.log(`Phone light gun relay server listening on http://0.0.0.0:${PORT}`);
+});
