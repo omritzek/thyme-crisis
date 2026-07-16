@@ -41,9 +41,15 @@
   var blockedFlash = document.getElementById('blockedFlash');
   var ammoReadout = document.getElementById('ammoReadout');
   var playHint = document.getElementById('playHint');
+  var screenWaiting = document.getElementById('screenWaiting');
+  var waitingMessage = document.getElementById('waitingMessage');
+  var waitingHint = document.getElementById('waitingHint');
+  var playerBadge = document.getElementById('playerBadge');
+  var playerBadgeDot = document.getElementById('playerBadgeDot');
+  var playerBadgeText = document.getElementById('playerBadgeText');
 
   // --- state ---
-  var appState = 'join'; // join | connecting | motion-permission | calibrating | playing
+  var appState = 'join'; // join | connecting | motion-permission | calibrating | playing | waiting
   var ws = null;
   var latestOrientation = null; // {alpha, beta, gamma}
   var baseline = null; // {azimuth, elevation} of the pointing vector at calibration time
@@ -51,13 +57,25 @@
   var lastGoodAimAt = 0;
   var sendIntervalId = null;
   var hasCalibratedOnce = false; // only the first calibration should tell the display to start the game; recalibrating mid-game shouldn't reset it
+  var myPlayerId = null;
 
   function showScreen(name) {
     screenJoin.classList.toggle('hidden', name !== 'join');
     screenStatus.classList.toggle('hidden', name !== 'status');
     screenMotion.classList.toggle('hidden', name !== 'motion');
     screenCalibrate.classList.toggle('hidden', name !== 'calibrate');
+    screenWaiting.classList.toggle('hidden', name !== 'waiting');
     playScreen.style.display = name === 'play' ? 'flex' : 'none';
+  }
+
+  function showWaitingScreen(message, hintText, cssClass) {
+    appState = 'waiting';
+    if (sendIntervalId) { clearInterval(sendIntervalId); sendIntervalId = null; }
+    waitingMessage.textContent = message;
+    waitingMessage.classList.remove('cleared', 'game-over');
+    if (cssClass) waitingMessage.classList.add(cssClass);
+    waitingHint.textContent = hintText || '';
+    showScreen('waiting');
   }
 
   function setStatus(text, errorText) {
@@ -67,6 +85,16 @@
     showScreen('status');
   }
 
+  function updatePlayerBadge() {
+    if (myPlayerId === null) {
+      playerBadge.classList.remove('visible');
+      return;
+    }
+    playerBadgeDot.style.background = PROTOCOL.PLAYER_COLORS[(myPlayerId - 1) % PROTOCOL.PLAYER_COLORS.length];
+    playerBadgeText.textContent = 'Player ' + myPlayerId;
+    playerBadge.classList.add('visible');
+  }
+
   function backToJoin() {
     if (ws) { try { ws.close(); } catch (e) {} ws = null; }
     if (sendIntervalId) { clearInterval(sendIntervalId); sendIntervalId = null; }
@@ -74,6 +102,8 @@
     baseline = null;
     lastAim = null;
     hasCalibratedOnce = false;
+    myPlayerId = null;
+    updatePlayerBadge();
     appState = 'join';
     joinError.textContent = '';
     showScreen('join');
@@ -100,9 +130,19 @@
 
       if (msg.type === PROTOCOL.MSG_SESSION_ERROR) {
         setStatus('Could not join', msg.reason || 'That session code is not available.');
+      } else if (msg.type === PROTOCOL.MSG_PLAYER_ASSIGNED) {
+        myPlayerId = msg.playerId;
+        updatePlayerBadge();
       } else if (msg.type === PROTOCOL.MSG_SESSION_READY) {
         appState = 'motion-permission';
         showScreen('motion');
+      } else if (msg.type === PROTOCOL.MSG_YOU_ARE_OUT) {
+        showWaitingScreen('YOU\'RE OUT', 'Spectating — waiting for the round to end.');
+      } else if (msg.type === PROTOCOL.MSG_ROUND_ENDED) {
+        var cleared = msg.result === 'cleared';
+        showWaitingScreen(cleared ? 'LEVEL CLEARED!' : 'GAME OVER', 'Waiting for the next round…', cleared ? 'cleared' : 'game-over');
+      } else if (msg.type === PROTOCOL.MSG_ROUND_STARTED) {
+        if (appState === 'waiting' && baseline) enterPlayingState();
       } else if (msg.type === PROTOCOL.MSG_PEER_DISCONNECTED) {
         if (sendIntervalId) { clearInterval(sendIntervalId); sendIntervalId = null; }
         setStatus('Display disconnected', 'Go back and rejoin the session.');
@@ -287,9 +327,7 @@
     }
   }
 
-  function calibrate() {
-    if (!latestOrientation) return;
-    baseline = azimuthElevation(pointingVector(latestOrientation));
+  function enterPlayingState() {
     appState = 'playing';
     showScreen('play');
     ammo = AMMO_MAX;
@@ -297,6 +335,12 @@
     updateAmmoUi();
     if (sendIntervalId) clearInterval(sendIntervalId);
     sendIntervalId = setInterval(tick, SEND_INTERVAL_MS);
+  }
+
+  function calibrate() {
+    if (!latestOrientation) return;
+    baseline = azimuthElevation(pointingVector(latestOrientation));
+    enterPlayingState();
 
     if (!hasCalibratedOnce) {
       hasCalibratedOnce = true;

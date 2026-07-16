@@ -27,7 +27,8 @@
   var STARTING_LIVES = 3;
   var DAMAGE_FLASH_MS = 400;
   var ENEMY_MUZZLE_FLASH_MS = 350;
-  var GAME_OVER_DISPLAY_MS = 4500;
+  var ROUND_END_DISPLAY_MS = 4500;
+  var ENEMIES_TO_CLEAR = 15; // defeat this many as a group to clear the level
 
   var pairingEl = document.getElementById('pairing');
   var stageEl = document.getElementById('stage');
@@ -46,23 +47,25 @@
   var sessionCode = generateSessionCode();
   var ws = null;
 
-  var score = 0;
-  var shots = 0;
-  var lives = STARTING_LIVES;
+  // players: playerId -> { color, lives, score, shots, out }. Populated as
+  // phones join (player_joined) and never removed (even on player_left /
+  // elimination) so a final scoreboard can still show everyone who played.
+  var players = new Map();
+  var crosshairs = new Map(); // playerId -> { x, y, visible }
+  var enemiesDefeated = 0;
   var target = null;
   var lastSpotIndex = -1;
   var nextSpawnAt = 0;
-  var crosshair = { x: W / 2, y: H / 2, visible: false };
   var missFlashes = [];
   var muzzleFlashes = []; // enemy fired-back effects, at the enemy's position
   var hitBurstFlashes = []; // bright burst at the impact point on a successful hit
   var HIT_BURST_MS = 300;
   var hitFlashUntil = 0;
   var damageFlashUntil = 0;
-  var gameOver = false;
-  var gameOverAt = 0;
+  var roundResult = null; // null while playing, else 'cleared' | 'game_over'
+  var roundResultAt = 0;
   var paired = false;
-  var calibrated = false; // the phone has finished its first calibration -- enemies only start spawning after this
+  var roundStarted = false; // at least one phone has finished its first calibration -- enemies only start spawning after this
 
   // Pausing (Esc) needs to freeze every timestamp-driven timer (spawn cadence,
   // enemy fire-back deadline, flash effects) without them jumping forward the
@@ -131,6 +134,25 @@
     return code;
   }
 
+  // Deterministic from playerId alone -- the server assigns playerIds but
+  // never needs to know about colors, since both clients derive the same
+  // color from the same id independently.
+  function playerColor(playerId) {
+    return PROTOCOL.PLAYER_COLORS[(playerId - 1) % PROTOCOL.PLAYER_COLORS.length];
+  }
+
+  function sendToPhone(playerId, msg) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    var out = {};
+    for (var k in msg) out[k] = msg[k];
+    out.targetPlayerId = playerId;
+    ws.send(JSON.stringify(out));
+  }
+
+  function broadcastToPhones(msg) {
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+  }
+
   function resizeCanvasToWindow() {
     var scale = Math.min(window.innerWidth / W, window.innerHeight / H);
     canvas.style.width = (W * scale) + 'px';
@@ -139,6 +161,9 @@
 
   function showPairing() {
     paired = false;
+    roundStarted = false;
+    players.clear();
+    crosshairs.clear();
     pairingEl.classList.remove('hidden');
     stageEl.classList.add('hidden');
   }
@@ -150,17 +175,21 @@
   }
 
   function startNewGame(now) {
-    score = 0;
-    shots = 0;
-    lives = STARTING_LIVES;
-    gameOver = false;
+    roundResult = null;
     target = null;
     lastSpotIndex = -1;
     nextSpawnAt = now + 1000;
+    enemiesDefeated = 0;
+    players.forEach(function (p) {
+      p.lives = STARTING_LIVES;
+      p.score = 0;
+      p.shots = 0;
+      p.out = false;
+    });
   }
 
   function pauseGame() {
-    if (!paired || !calibrated || gameOver || paused) return;
+    if (!paired || !roundStarted || roundResult || paused) return;
     paused = true;
     pauseStartedAt = performance.now();
     pauseOverlayEl.classList.remove('hidden');
@@ -177,6 +206,7 @@
     pauseOverlayEl.classList.add('hidden');
     paused = false;
     startNewGame(gameNow());
+    broadcastToPhones({ type: PROTOCOL.MSG_ROUND_STARTED });
   }
 
   function quitToLobby() {
@@ -185,7 +215,7 @@
     // The existing 'close' handler already shows the pairing screen and
     // reconnects (same session code) after a short delay — the same path
     // used for any real disconnect — which also relays a peer_disconnected
-    // to the phone, sending it back to its own join screen.
+    // to every phone, sending them back to their own join screen.
     if (ws) { try { ws.close(); } catch (e) {} }
   }
 
@@ -215,11 +245,31 @@
     return 1; // includes the 'hit' hold state — stays full size so the hit sprite reads clearly
   }
 
-  function updateGame(now) {
-    if (!calibrated) return;
+  // True once every currently-known player has 0 lives -- the group is out.
+  function allPlayersOut() {
+    if (players.size === 0) return false;
+    var out = true;
+    players.forEach(function (p) { if (!p.out) out = false; });
+    return out;
+  }
 
-    if (gameOver) {
-      if (now - gameOverAt >= GAME_OVER_DISPLAY_MS) startNewGame(now);
+  function checkRoundEnd(now) {
+    if (roundResult) return;
+    if (allPlayersOut()) {
+      roundResult = 'game_over';
+      roundResultAt = now;
+      broadcastToPhones({ type: PROTOCOL.MSG_ROUND_ENDED, result: 'game_over' });
+    }
+  }
+
+  function updateGame(now) {
+    if (!roundStarted) return;
+
+    if (roundResult) {
+      if (now - roundResultAt >= ROUND_END_DISPLAY_MS) {
+        startNewGame(now);
+        broadcastToPhones({ type: PROTOCOL.MSG_ROUND_STARTED });
+      }
       return;
     }
 
@@ -237,17 +287,27 @@
     if (target.state === 'popping-up' && now - target.stateStartedAt >= POP_UP_MS) {
       target.state = 'visible';
     } else if (target.state === 'visible' && !target.resolved && now >= target.firesAt) {
-      // not shot in time -- the enemy fires back
+      // Not shot in time -- the enemy fires back. With one shared enemy and
+      // several players, there's no notion of "who it was aiming at", so it
+      // just hits a random player who's still in the round.
       target.resolved = true;
       target.state = 'popping-down';
       target.stateStartedAt = now;
       muzzleFlashes.push({ x: target.x, y: target.y, expire: now + ENEMY_MUZZLE_FLASH_MS });
       damageFlashUntil = now + DAMAGE_FLASH_MS;
-      lives--;
-      if (lives <= 0) {
-        gameOver = true;
-        gameOverAt = now;
+
+      var alive = [];
+      players.forEach(function (p, pid) { if (!p.out) alive.push(pid); });
+      if (alive.length) {
+        var victimId = alive[Math.floor(Math.random() * alive.length)];
+        var victim = players.get(victimId);
+        victim.lives--;
+        if (victim.lives <= 0) {
+          victim.out = true;
+          sendToPhone(victimId, { type: PROTOCOL.MSG_YOU_ARE_OUT });
+        }
       }
+      checkRoundEnd(now);
     } else if (target.state === 'hit' && now - target.stateStartedAt >= HIT_HOLD_MS) {
       target.state = 'popping-down';
       target.stateStartedAt = now;
@@ -257,8 +317,10 @@
   }
 
   function handleFire(msg) {
-    if (!calibrated || gameOver || paused) return;
-    shots++;
+    if (!roundStarted || roundResult || paused) return;
+    var shooter = players.get(msg.playerId);
+    if (!shooter || shooter.out) return;
+    shooter.shots++;
     var px = msg.x * W;
     var py = msg.y * H;
     var now = gameNow();
@@ -267,12 +329,18 @@
       var dy = py - target.y;
       var dist = Math.sqrt(dx * dx + dy * dy);
       if (dist <= target.r + HIT_FORGIVENESS) {
-        score++;
+        shooter.score++;
         target.resolved = true;
         hitFlashUntil = now + HIT_HOLD_MS;
         target.state = 'hit';
         target.stateStartedAt = now;
         hitBurstFlashes.push({ x: target.x, y: target.y, expire: now + HIT_BURST_MS });
+        enemiesDefeated++;
+        if (enemiesDefeated >= ENEMIES_TO_CLEAR) {
+          roundResult = 'cleared';
+          roundResultAt = now;
+          broadcastToPhones({ type: PROTOCOL.MSG_ROUND_ENDED, result: 'cleared' });
+        }
         return;
       }
     }
@@ -287,24 +355,40 @@
       var msg;
       try { msg = JSON.parse(evt.data); } catch (e) { return; }
 
-      if (msg.type === PROTOCOL.MSG_PHONE_CONNECTED) {
-        ws.send(JSON.stringify({ type: PROTOCOL.MSG_SESSION_READY }));
-        calibrated = false;
-        score = 0;
-        shots = 0;
-        lives = STARTING_LIVES;
-        target = null;
+      if (msg.type === PROTOCOL.MSG_PLAYER_JOINED) {
+        var joinedId = msg.playerId;
+        if (!players.has(joinedId)) {
+          players.set(joinedId, { color: playerColor(joinedId), lives: STARTING_LIVES, score: 0, shots: 0, out: false });
+        }
+        crosshairs.set(joinedId, { x: W / 2, y: H / 2, visible: false });
         showGame();
+        sendToPhone(joinedId, { type: PROTOCOL.MSG_SESSION_READY });
+      } else if (msg.type === PROTOCOL.MSG_PLAYER_LEFT) {
+        var leftId = msg.playerId;
+        crosshairs.delete(leftId);
+        var leftPlayer = players.get(leftId);
+        if (leftPlayer) leftPlayer.out = true;
+        checkRoundEnd(gameNow());
       } else if (msg.type === PROTOCOL.MSG_CALIBRATED) {
-        calibrated = true;
-        startNewGame(gameNow());
-      } else if (msg.type === PROTOCOL.MSG_PEER_DISCONNECTED) {
-        calibrated = false;
-        showPairing();
+        var calibratedId = msg.playerId;
+        var calibratedPlayer = players.get(calibratedId);
+        if (calibratedPlayer) {
+          calibratedPlayer.lives = STARTING_LIVES;
+          calibratedPlayer.score = 0;
+          calibratedPlayer.shots = 0;
+          calibratedPlayer.out = false;
+        }
+        if (!roundStarted) {
+          roundStarted = true;
+          startNewGame(gameNow());
+        }
       } else if (msg.type === PROTOCOL.MSG_AIM) {
-        crosshair.x = msg.x * W;
-        crosshair.y = msg.y * H;
-        crosshair.visible = true;
+        var aiming = crosshairs.get(msg.playerId);
+        if (aiming) {
+          aiming.x = msg.x * W;
+          aiming.y = msg.y * H;
+          aiming.visible = true;
+        }
       } else if (msg.type === PROTOCOL.MSG_FIRE) {
         handleFire(msg);
       }
@@ -495,68 +579,102 @@
     ctx.fillRect(0, 0, W, H);
   }
 
-  function drawGameOver() {
-    if (!gameOver) return;
-    ctx.fillStyle = 'rgba(10, 10, 6, 0.72)';
+  function drawRoundEndOverlay() {
+    if (!roundResult) return;
+    ctx.fillStyle = 'rgba(10, 10, 6, 0.78)';
     ctx.fillRect(0, 0, W, H);
 
+    var cleared = roundResult === 'cleared';
     ctx.textAlign = 'center';
-    ctx.font = '900 72px "Arial Black", Arial, sans-serif';
-    ctx.fillStyle = '#d84a3a';
-    ctx.fillText('GAME OVER', W / 2, H / 2 - 20);
+    ctx.font = '900 64px "Arial Black", Arial, sans-serif';
+    ctx.fillStyle = cleared ? '#8fd94a' : '#d84a3a';
+    ctx.fillText(cleared ? 'LEVEL CLEARED' : 'GAME OVER', W / 2, 130);
 
-    ctx.font = '28px -apple-system, Helvetica, Arial, sans-serif';
-    ctx.fillStyle = '#ded9c4';
-    ctx.fillText('Final Score: ' + score, W / 2, H / 2 + 34);
+    var ranked = Array.from(players.entries()).sort(function (a, b) { return b[1].score - a[1].score; });
+    var winnerId = cleared && ranked.length ? ranked[0][0] : null;
 
+    ctx.font = '26px -apple-system, Helvetica, Arial, sans-serif';
+    var startY = 210;
+    ranked.forEach(function (entry, i) {
+      var pid = entry[0], p = entry[1];
+      var y = startY + i * 44;
+      var label = 'P' + pid + '   ' + p.score + ' pts' + (pid === winnerId ? '   ★ WINNER' : '');
+      ctx.fillStyle = p.color;
+      ctx.fillRect(W / 2 - 220, y - 24, 20, 20);
+      ctx.fillStyle = pid === winnerId ? '#ffd24d' : '#ded9c4';
+      ctx.textAlign = 'left';
+      ctx.fillText(label, W / 2 - 190, y - 6);
+    });
+
+    ctx.textAlign = 'center';
     ctx.font = '16px -apple-system, Helvetica, Arial, sans-serif';
     ctx.fillStyle = '#a29d87';
-    ctx.fillText('Next mission starting soon…', W / 2, H / 2 + 74);
+    ctx.fillText('Next round starting soon…', W / 2, startY + ranked.length * 44 + 30);
   }
 
   function drawWaitingForCalibration() {
-    if (calibrated) return;
+    if (roundStarted) return;
     ctx.fillStyle = 'rgba(10, 10, 6, 0.6)';
     ctx.fillRect(0, 0, W, H);
 
     ctx.textAlign = 'center';
     ctx.font = '900 40px "Arial Black", Arial, sans-serif';
     ctx.fillStyle = '#ded9c4';
-    ctx.fillText('WAITING FOR PLAYER', W / 2, H / 2 - 10);
+    ctx.fillText('WAITING FOR PLAYERS', W / 2, H / 2 - 10);
 
     ctx.font = '18px -apple-system, Helvetica, Arial, sans-serif';
     ctx.fillStyle = '#a29d87';
     ctx.fillText('Calibrate your phone to begin', W / 2, H / 2 + 28);
   }
 
-  function drawCrosshair() {
-    if (!crosshair.visible) return;
-    var x = crosshair.x, y = crosshair.y;
-    ctx.strokeStyle = '#00ffe1';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(x, y, 18, 0, Math.PI * 2);
-    ctx.moveTo(x - 26, y);
-    ctx.lineTo(x - 8, y);
-    ctx.moveTo(x + 8, y);
-    ctx.lineTo(x + 26, y);
-    ctx.moveTo(x, y - 26);
-    ctx.lineTo(x, y - 8);
-    ctx.moveTo(x, y + 8);
-    ctx.lineTo(x, y + 26);
-    ctx.stroke();
+  function drawCrosshairs() {
+    crosshairs.forEach(function (c, pid) {
+      if (!c.visible) return;
+      var p = players.get(pid);
+      if (p && p.out) return;
+      var x = c.x, y = c.y;
+      ctx.strokeStyle = p ? p.color : '#00ffe1';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(x, y, 18, 0, Math.PI * 2);
+      ctx.moveTo(x - 26, y);
+      ctx.lineTo(x - 8, y);
+      ctx.moveTo(x + 8, y);
+      ctx.lineTo(x + 26, y);
+      ctx.moveTo(x, y - 26);
+      ctx.lineTo(x, y - 8);
+      ctx.moveTo(x, y + 8);
+      ctx.lineTo(x, y + 26);
+      ctx.stroke();
+    });
   }
 
   function drawHud() {
-    var accuracy = shots > 0 ? Math.round((score / shots) * 100) : 0;
-    var text = 'Lives: ' + Math.max(0, lives) + '    Score: ' + score + '    Shots: ' + shots + '    Accuracy: ' + accuracy + '%';
-    ctx.font = '24px -apple-system, Helvetica, Arial, sans-serif';
+    var progressText = 'Enemies: ' + enemiesDefeated + ' / ' + ENEMIES_TO_CLEAR;
+    ctx.font = '22px -apple-system, Helvetica, Arial, sans-serif';
     ctx.textAlign = 'center';
-    var textWidth = ctx.measureText(text).width;
+    var pw = ctx.measureText(progressText).width;
     ctx.fillStyle = 'rgba(0,0,0,0.45)';
-    ctx.fillRect(W / 2 - textWidth / 2 - 16, 10, textWidth + 32, 32);
+    ctx.fillRect(W / 2 - pw / 2 - 14, 10, pw + 28, 30);
     ctx.fillStyle = '#eee';
-    ctx.fillText(text, W / 2, 34);
+    ctx.fillText(progressText, W / 2, 32);
+
+    var sortedPlayers = Array.from(players.entries()).sort(function (a, b) { return a[0] - b[0]; });
+    ctx.textAlign = 'left';
+    ctx.font = '18px -apple-system, Helvetica, Arial, sans-serif';
+    var rowY = 50;
+    sortedPlayers.forEach(function (entry) {
+      var pid = entry[0], p = entry[1];
+      var label = 'P' + pid + (p.out ? '   OUT' : '   ♥' + Math.max(0, p.lives) + '   ' + p.score + 'pt');
+      var tw = ctx.measureText(label).width;
+      ctx.fillStyle = 'rgba(0,0,0,0.45)';
+      ctx.fillRect(10, rowY, tw + 46, 26);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(14, rowY + 5, 16, 16);
+      ctx.fillStyle = p.out ? '#888' : '#eee';
+      ctx.fillText(label, 36, rowY + 18);
+      rowY += 30;
+    });
   }
 
   function drawBackground() {
@@ -582,11 +700,11 @@
     drawHitBurstFlashes(now);
     drawMuzzleFlashes(now);
     drawMissFlashes(now);
-    drawCrosshair();
+    drawCrosshairs();
     drawDamageFlash(now);
     drawHud();
     if (paired) drawWaitingForCalibration();
-    drawGameOver();
+    drawRoundEndOverlay();
     requestAnimationFrame(render);
   }
 

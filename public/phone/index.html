@@ -143,6 +143,43 @@
     display: none;
     pointer-events: none;
   }
+
+  #playerBadge {
+    position: fixed;
+    top: 14px;
+    left: 14px;
+    display: none;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    background: rgba(0, 0, 0, 0.5);
+    border-radius: 4px;
+    font-family: var(--tc-font);
+    font-size: 13px;
+    letter-spacing: 1px;
+    color: var(--tc-cream);
+    z-index: 10;
+  }
+  #playerBadge.visible {
+    display: flex;
+  }
+  #playerBadgeDot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+  }
+
+  #waitingMessage {
+    font-family: var(--tc-font);
+    font-size: 28px;
+    letter-spacing: 1px;
+  }
+  #waitingMessage.cleared {
+    color: #8fd94a;
+  }
+  #waitingMessage.game-over {
+    color: var(--tc-danger);
+  }
 </style>
 </head>
 <body class="tc-backdrop">
@@ -189,6 +226,16 @@
     <div id="playHint">TAP ANYWHERE TO FIRE</div>
     <button id="recalibrateBtn" class="tc-btn">Recalibrate</button>
     <div id="blockedFlash"></div>
+  </div>
+
+  <div id="screenWaiting" class="screen hidden">
+    <h1 id="waitingMessage">Waiting…</h1>
+    <p id="waitingHint" class="hint"></p>
+  </div>
+
+  <div id="playerBadge">
+    <div id="playerBadgeDot"></div>
+    <div id="playerBadgeText">Player 1</div>
   </div>
 
   <script src="/shared/protocol.js"></script>

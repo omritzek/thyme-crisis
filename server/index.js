@@ -164,15 +164,23 @@ app.use(express.static(path.join(__dirname, '../public')));
 
 // --- WebSocket relay ---
 // Rooms are keyed by 4-char session code. Each room holds at most one
-// display socket and one phone socket. The server only relays app-level
-// messages between the two peers in a room; it never inspects game state.
+// display socket and up to MAX_PLAYERS phone sockets, each assigned a
+// stable playerId on connect (must match PLAYER_COLORS.length in
+// public/shared/protocol.js, which is what actually turns a playerId into a
+// color on the two clients -- the server never needs to know about colors).
+// The server tags every phone->display message with the sender's playerId,
+// and honors an optional targetPlayerId on display->phone messages (routed
+// to just that one phone; broadcast to all phones if absent). Beyond that
+// routing, it never inspects game state.
 
-const rooms = new Map(); // session -> { display: ws|null, phone: ws|null }
+const MAX_PLAYERS = 4;
+
+const rooms = new Map(); // session -> { display: ws|null, phones: Map<playerId, ws>, nextPlayerId: number }
 
 function getRoom(session) {
   let room = rooms.get(session);
   if (!room) {
-    room = { display: null, phone: null };
+    room = { display: null, phones: new Map(), nextPlayerId: 1 };
     rooms.set(session, room);
   }
   return room;
@@ -180,19 +188,19 @@ function getRoom(session) {
 
 function cleanupRoom(session) {
   const room = rooms.get(session);
-  if (room && !room.display && !room.phone) {
+  if (room && !room.display && room.phones.size === 0) {
     rooms.delete(session);
   }
-}
-
-function otherRole(role) {
-  return role === 'display' ? 'phone' : 'display';
 }
 
 function send(ws, msg) {
   if (ws && ws.readyState === ws.OPEN) {
     ws.send(JSON.stringify(msg));
   }
+}
+
+function broadcastToPhones(room, msg) {
+  room.phones.forEach((ws) => send(ws, msg));
 }
 
 function attachWebSocketServer(server) {
@@ -214,26 +222,64 @@ function attachWebSocketServer(server) {
 
     const room = getRoom(session);
 
-    if (room[role]) {
-      console.log(`[ws] rejected: role already connected (role=${role} session=${session})`);
-      send(ws, { type: 'session_error', reason: 'that role is already connected for this session' });
+    if (role === 'display') {
+      if (room.display) {
+        console.log(`[ws] rejected: display already connected (session=${session})`);
+        send(ws, { type: 'session_error', reason: 'a display is already connected for this session' });
+        ws.close();
+        return;
+      }
+
+      room.display = ws;
+      ws.session = session;
+      ws.role = 'display';
+      console.log(`[ws] joined: role=display session=${session} (${room.phones.size} phone(s) already present)`);
+
+      room.phones.forEach((phoneWs, playerId) => {
+        send(ws, { type: 'player_joined', playerId });
+      });
+
+      ws.on('message', (data) => {
+        let msg;
+        try {
+          msg = JSON.parse(data);
+        } catch (err) {
+          return;
+        }
+        if (msg.targetPlayerId != null) {
+          send(room.phones.get(msg.targetPlayerId), msg);
+        } else {
+          broadcastToPhones(room, msg);
+        }
+      });
+
+      ws.on('close', () => {
+        const current = rooms.get(session);
+        if (!current) return;
+        if (current.display === ws) current.display = null;
+        broadcastToPhones(current, { type: 'peer_disconnected' });
+        cleanupRoom(session);
+      });
+      return;
+    }
+
+    // role === 'phone'
+    if (room.phones.size >= MAX_PLAYERS) {
+      console.log(`[ws] rejected: session full (session=${session})`);
+      send(ws, { type: 'session_error', reason: 'this session already has the maximum number of players' });
       ws.close();
       return;
     }
 
-    room[role] = ws;
+    const playerId = room.nextPlayerId++;
+    room.phones.set(playerId, ws);
     ws.session = session;
-    ws.role = role;
-    console.log(`[ws] joined: role=${role} session=${session} (peer ${room[otherRole(role)] ? 'present' : 'not yet connected'})`);
+    ws.role = 'phone';
+    ws.playerId = playerId;
+    console.log(`[ws] joined: role=phone playerId=${playerId} session=${session} (display ${room.display ? 'present' : 'not yet connected'})`);
 
-    const peer = room[otherRole(role)];
-    if (peer) {
-      if (role === 'phone') {
-        send(peer, { type: 'phone_connected' });
-      } else {
-        send(peer, { type: 'display_connected' });
-      }
-    }
+    send(ws, { type: 'player_assigned', playerId });
+    if (room.display) send(room.display, { type: 'player_joined', playerId });
 
     ws.on('message', (data) => {
       let msg;
@@ -242,19 +288,16 @@ function attachWebSocketServer(server) {
       } catch (err) {
         return;
       }
-      const target = room[otherRole(ws.role)];
-      send(target, msg);
+      msg.playerId = playerId;
+      send(room.display, msg);
     });
 
     ws.on('close', () => {
-      const current = rooms.get(ws.session);
+      const current = rooms.get(session);
       if (!current) return;
-      if (current[ws.role] === ws) {
-        current[ws.role] = null;
-      }
-      const remainingPeer = current[otherRole(ws.role)];
-      send(remainingPeer, { type: 'peer_disconnected' });
-      cleanupRoom(ws.session);
+      current.phones.delete(playerId);
+      if (current.display) send(current.display, { type: 'player_left', playerId });
+      cleanupRoom(session);
     });
   });
 }
