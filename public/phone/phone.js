@@ -111,6 +111,11 @@
   // --- Camera ---
 
   function startCamera() {
+    setStatus('Requesting camera access…', '');
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setStatus('Camera access unavailable', 'This browser cannot access the camera on this page (it may need to be loaded over HTTPS).');
+      return;
+    }
     navigator.mediaDevices.getUserMedia({
       video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
       audio: false

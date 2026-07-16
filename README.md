@@ -13,9 +13,7 @@ They connect through a small local WebSocket relay server.
 
 - Node.js 18+
 - A computer and a phone on the **same local network**
-- A modern mobile browser with rear camera access (served over `http://` on a LAN
-  is fine for `getUserMedia` on most Android browsers; iOS Safari requires HTTPS or
-  `localhost` — see Troubleshooting below)
+- A modern mobile browser with rear camera access
 
 ## Setup
 
@@ -24,21 +22,34 @@ npm install
 npm start
 ```
 
-The server listens on port 3000 by default (override with `PORT=xxxx npm start`).
+The server listens on port 3000 by default (override with `PORT=xxxx npm start`),
+and serves everything over **HTTPS with a self-signed certificate** — generated
+fresh each time the server starts, valid for `localhost`, `127.0.0.1`, and every
+LAN IP address detected on the machine. This is required because mobile browsers
+(iOS Safari/WebKit in particular) block camera access (`getUserMedia`) on any page
+loaded over plain `http://`, even on a local network.
+
+Because the certificate isn't from a trusted CA, **every device will show a
+"connection is not private" warning the first time it loads the page** — this is
+expected. Click through it (e.g. "Advanced" → "Proceed anyway" / "visit this
+website") on both the computer and the phone.
 
 ## Playing
 
-1. On the computer, open `http://<computer-lan-ip>:3000/` in a browser and go
-   full-screen. It shows a 4-character session code and a QR code.
-2. On the phone, open `http://<computer-lan-ip>:3000/phone`, or scan the QR code,
-   and tap **Join** (the code is pre-filled if you scanned the QR).
+1. On the computer, open `https://<computer-lan-ip>:3000/` in a browser, accept
+   the certificate warning, and go full-screen. It shows a 4-character session
+   code and a QR code.
+2. On the phone, open `https://<computer-lan-ip>:3000/phone`, or scan the QR code
+   (the QR always encodes an `https://` link), accept the certificate warning, and
+   tap **Join** (the code is pre-filled if you scanned the QR).
 3. Grant camera access when prompted. Point the rear camera at the computer screen
    until the "Detecting markers" overlay shows 4/4 and the **Start** button enables.
 4. Tap **Start**, then aim by physically moving the phone (the crosshair overlay
    marks the phone's fixed aim point) and tap anywhere on the phone screen to fire.
 
 Find your computer's LAN IP with `ipconfig getifaddr en0` (macOS), `hostname -I`
-(Linux), or `ipconfig` (Windows).
+(Linux), or `ipconfig` (Windows) — or just read it from the server's startup log,
+which prints every LAN address it's reachable on.
 
 ## Project structure
 
@@ -60,9 +71,12 @@ package.json
 ## How it works
 
 - **Relay server** (`server/index.js`): an Express app plus a `ws` WebSocket
-  server. Clients connect to `/?role=display&session=CODE` or
-  `/?role=phone&session=CODE`. The server pairs at most one display and one phone
-  per session code and relays JSON messages between them — it holds no game state.
+  server, both running over a self-signed HTTPS certificate generated at startup
+  (via the `selfsigned` package). Clients connect to `/?role=display&session=CODE`
+  or `/?role=phone&session=CODE`. The server pairs at most one display and one
+  phone per session code and relays JSON messages between them — it holds no game
+  state. Every connection attempt and its outcome is logged to the terminal, which
+  is the fastest way to debug a pairing that won't complete.
 - **Display client**: owns all game state — the target's position, score, and shot
   count. Renders a fixed 1280×720 logical canvas with four colored corner markers
   (red/green/blue/yellow, top-left/top-right/bottom-left/bottom-right) that never
@@ -85,7 +99,8 @@ package.json
 - Tuned for a fixed, controlled distance/lighting — no auto-exposure compensation.
 - No moving targets, multiplayer, or persistence — this is an MVP proving the
   aiming interaction, not a shippable game.
-- iOS Safari requires a secure context (HTTPS or `localhost`) for camera access;
-  on a plain `http://` LAN address it may block `getUserMedia`. For a quick local
-  test on iOS, tunnel the port through an HTTPS-terminating proxy, or test on
-  Android where plain-HTTP LAN camera access is generally allowed.
+- The self-signed certificate means every device must click through a browser
+  security warning once per server restart (the cert is regenerated fresh each
+  time `npm start` runs). If you'd rather not see that warning at all, generate a
+  locally-trusted certificate with [mkcert](https://github.com/FiloSottile/mkcert)
+  and pass its key/cert paths in instead — not needed for normal use.

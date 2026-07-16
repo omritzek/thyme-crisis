@@ -1,14 +1,47 @@
 const path = require('path');
-const http = require('http');
+const os = require('os');
+const https = require('https');
 const express = require('express');
 const QRCode = require('qrcode');
+const selfsigned = require('selfsigned');
 const { WebSocketServer } = require('ws');
 
 const PORT = process.env.PORT || 3000;
 const SESSION_RE = /^[A-Z0-9]{4}$/;
 
 const app = express();
-const server = http.createServer(app);
+
+// The phone needs camera access (getUserMedia), which mobile browsers only
+// allow on a secure context (HTTPS or localhost) — a plain http:// LAN
+// address is blocked, most strictly on iOS Safari/WebKit. So the whole app
+// is served over a self-signed HTTPS cert; every device that visits it
+// (display included) will see a one-time "not secure" warning to click
+// through, since the cert isn't from a trusted CA.
+function localLanIps() {
+  const ips = [];
+  const interfaces = os.networkInterfaces();
+  Object.values(interfaces).forEach((addrs) => {
+    (addrs || []).forEach((addr) => {
+      if (addr.family === 'IPv4' && !addr.internal) ips.push(addr.address);
+    });
+  });
+  return ips;
+}
+
+async function generateCert() {
+  const altNames = [
+    { type: 2, value: 'localhost' }, // DNS
+    { type: 7, ip: '127.0.0.1' } // IP
+  ];
+  localLanIps().forEach((ip) => altNames.push({ type: 7, ip }));
+
+  const pems = await selfsigned.generate([{ name: 'commonName', value: 'localhost' }], {
+    days: 365,
+    keySize: 2048,
+    extensions: [{ name: 'subjectAltName', altNames }]
+  });
+  return { key: pems.private, cert: pems.cert };
+}
 
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/display/index.html'));
@@ -70,68 +103,85 @@ function send(ws, msg) {
   }
 }
 
-const wss = new WebSocketServer({ server });
+function attachWebSocketServer(server) {
+  const wss = new WebSocketServer({ server });
 
-wss.on('connection', (ws, req) => {
-  const url = new URL(req.url, `http://${req.headers.host}`);
-  const role = url.searchParams.get('role');
-  const session = (url.searchParams.get('session') || '').toUpperCase();
+  wss.on('connection', (ws, req) => {
+    const url = new URL(req.url, `https://${req.headers.host}`);
+    const role = url.searchParams.get('role');
+    const session = (url.searchParams.get('session') || '').toUpperCase();
 
-  console.log(`[ws] connection attempt: role=${role} session=${session} from=${req.socket.remoteAddress}`);
+    console.log(`[ws] connection attempt: role=${role} session=${session} from=${req.socket.remoteAddress}`);
 
-  if ((role !== 'display' && role !== 'phone') || !SESSION_RE.test(session)) {
-    console.log(`[ws] rejected: invalid role or session code (role=${role} session=${session})`);
-    send(ws, { type: 'session_error', reason: 'invalid role or session code' });
-    ws.close();
-    return;
-  }
-
-  const room = getRoom(session);
-
-  if (room[role]) {
-    console.log(`[ws] rejected: role already connected (role=${role} session=${session})`);
-    send(ws, { type: 'session_error', reason: 'that role is already connected for this session' });
-    ws.close();
-    return;
-  }
-
-  room[role] = ws;
-  ws.session = session;
-  ws.role = role;
-  console.log(`[ws] joined: role=${role} session=${session} (peer ${room[otherRole(role)] ? 'present' : 'not yet connected'})`);
-
-  const peer = room[otherRole(role)];
-  if (peer) {
-    if (role === 'phone') {
-      send(peer, { type: 'phone_connected' });
-    } else {
-      send(peer, { type: 'display_connected' });
-    }
-  }
-
-  ws.on('message', (data) => {
-    let msg;
-    try {
-      msg = JSON.parse(data);
-    } catch (err) {
+    if ((role !== 'display' && role !== 'phone') || !SESSION_RE.test(session)) {
+      console.log(`[ws] rejected: invalid role or session code (role=${role} session=${session})`);
+      send(ws, { type: 'session_error', reason: 'invalid role or session code' });
+      ws.close();
       return;
     }
-    const target = room[otherRole(ws.role)];
-    send(target, msg);
-  });
 
-  ws.on('close', () => {
-    const current = rooms.get(ws.session);
-    if (!current) return;
-    if (current[ws.role] === ws) {
-      current[ws.role] = null;
+    const room = getRoom(session);
+
+    if (room[role]) {
+      console.log(`[ws] rejected: role already connected (role=${role} session=${session})`);
+      send(ws, { type: 'session_error', reason: 'that role is already connected for this session' });
+      ws.close();
+      return;
     }
-    const remainingPeer = current[otherRole(ws.role)];
-    send(remainingPeer, { type: 'peer_disconnected' });
-    cleanupRoom(ws.session);
-  });
-});
 
-server.listen(PORT, () => {
-  console.log(`Phone light gun relay server listening on http://0.0.0.0:${PORT}`);
-});
+    room[role] = ws;
+    ws.session = session;
+    ws.role = role;
+    console.log(`[ws] joined: role=${role} session=${session} (peer ${room[otherRole(role)] ? 'present' : 'not yet connected'})`);
+
+    const peer = room[otherRole(role)];
+    if (peer) {
+      if (role === 'phone') {
+        send(peer, { type: 'phone_connected' });
+      } else {
+        send(peer, { type: 'display_connected' });
+      }
+    }
+
+    ws.on('message', (data) => {
+      let msg;
+      try {
+        msg = JSON.parse(data);
+      } catch (err) {
+        return;
+      }
+      const target = room[otherRole(ws.role)];
+      send(target, msg);
+    });
+
+    ws.on('close', () => {
+      const current = rooms.get(ws.session);
+      if (!current) return;
+      if (current[ws.role] === ws) {
+        current[ws.role] = null;
+      }
+      const remainingPeer = current[otherRole(ws.role)];
+      send(remainingPeer, { type: 'peer_disconnected' });
+      cleanupRoom(ws.session);
+    });
+  });
+}
+
+async function main() {
+  const { key, cert } = await generateCert();
+  const server = https.createServer({ key, cert }, app);
+  attachWebSocketServer(server);
+
+  server.listen(PORT, () => {
+    console.log(`Phone light gun relay server listening on https://0.0.0.0:${PORT}`);
+    console.log('Using a self-signed certificate — every device will need to accept a');
+    console.log('one-time browser security warning the first time it loads the page.');
+    const ips = localLanIps();
+    if (ips.length) {
+      console.log('Reachable on your LAN at:');
+      ips.forEach((ip) => console.log(`  https://${ip}:${PORT}/`));
+    }
+  });
+}
+
+main();
