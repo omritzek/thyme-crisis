@@ -77,7 +77,10 @@ wss.on('connection', (ws, req) => {
   const role = url.searchParams.get('role');
   const session = (url.searchParams.get('session') || '').toUpperCase();
 
+  console.log(`[ws] connection attempt: role=${role} session=${session} from=${req.socket.remoteAddress}`);
+
   if ((role !== 'display' && role !== 'phone') || !SESSION_RE.test(session)) {
+    console.log(`[ws] rejected: invalid role or session code (role=${role} session=${session})`);
     send(ws, { type: 'session_error', reason: 'invalid role or session code' });
     ws.close();
     return;
@@ -86,6 +89,7 @@ wss.on('connection', (ws, req) => {
   const room = getRoom(session);
 
   if (room[role]) {
+    console.log(`[ws] rejected: role already connected (role=${role} session=${session})`);
     send(ws, { type: 'session_error', reason: 'that role is already connected for this session' });
     ws.close();
     return;
@@ -94,6 +98,7 @@ wss.on('connection', (ws, req) => {
   room[role] = ws;
   ws.session = session;
   ws.role = role;
+  console.log(`[ws] joined: role=${role} session=${session} (peer ${room[otherRole(role)] ? 'present' : 'not yet connected'})`);
 
   const peer = room[otherRole(role)];
   if (peer) {
