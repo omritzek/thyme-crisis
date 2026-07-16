@@ -58,6 +58,18 @@ Find your computer's LAN IP with `ipconfig getifaddr en0` (macOS), `hostname -I`
 (Linux), or `ipconfig` (Windows) — or just read it from the server's startup log,
 which prints every LAN address it's reachable on.
 
+## Customizing the visuals
+
+- **Background**: drop an image at `public/display/assets/playground.jpg` — see
+  `public/display/assets/README.md` for details. Falls back to a plain dark
+  background if it's not there.
+- **Enemy sprites**: drop PNG images (transparent background) into
+  `public/display/assets/enemies/` — see `public/display/assets/enemies/README.md`
+  for exact requirements. No restart needed beyond a page reload; the display
+  asks the server what's in that folder on load, and picks a random one per
+  spawn if there's more than one. Falls back to a built-in drawn face if the
+  folder is empty.
+
 ## Project structure
 
 ```
@@ -69,6 +81,7 @@ which prints every LAN address it's reachable on.
     display.js       # game state, rendering, hit detection
     /assets
       playground.jpg # background image (not checked in by default — see assets/README.md)
+      /enemies        # optional enemy sprite images (see enemies/README.md) — empty folder is fine
   /phone
     index.html
     phone.js          # motion sensor calibration, aim computation, input handling

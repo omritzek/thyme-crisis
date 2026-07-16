@@ -1,5 +1,6 @@
 const path = require('path');
 const os = require('os');
+const fs = require('fs/promises');
 const https = require('https');
 const express = require('express');
 const QRCode = require('qrcode');
@@ -65,6 +66,26 @@ app.get('/api/qrcode', async (req, res) => {
     res.json({ dataUrl });
   } catch (err) {
     res.status(500).json({ error: 'failed to render qr code' });
+  }
+});
+
+// Lists whatever enemy sprite images are actually present, so dropping a
+// file into public/display/assets/enemies/ is enough to use it — no code
+// change needed. Returns an empty list (not an error) if the folder is
+// missing or empty; the display falls back to its built-in drawn sprite.
+const ENEMY_SPRITE_DIR = path.join(__dirname, '../public/display/assets/enemies');
+const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp']);
+
+app.get('/api/enemy-sprites', async (req, res) => {
+  try {
+    const entries = await fs.readdir(ENEMY_SPRITE_DIR);
+    const files = entries
+      .filter((name) => IMAGE_EXTENSIONS.has(path.extname(name).toLowerCase()))
+      .sort()
+      .map((name) => `/display/assets/enemies/${name}`);
+    res.json({ sprites: files });
+  } catch (err) {
+    res.json({ sprites: [] });
   }
 });
 

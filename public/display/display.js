@@ -63,6 +63,22 @@
   bgImage.onload = function () { bgReady = true; };
   bgImage.src = '/display/assets/playground.jpg';
 
+  // Optional enemy sprite images — if the server finds any in
+  // public/display/assets/enemies/, use those instead of the built-in
+  // drawn face, picking a random one for each spawn. Falls back cleanly
+  // (drawTarget uses the drawn face) if the list is empty or fails to load.
+  var enemySprites = [];
+  fetch('/api/enemy-sprites')
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      (data.sprites || []).forEach(function (src) {
+        var img = new Image();
+        img.onload = function () { enemySprites.push(img); };
+        img.src = src;
+      });
+    })
+    .catch(function () { /* sprites are optional; built-in face still works */ });
+
   function generateSessionCode() {
     var code = '';
     for (var i = 0; i < 4; i++) {
@@ -113,7 +129,8 @@
       state: 'popping-up',
       stateStartedAt: now,
       firesAt: now + ENEMY_LIFETIME_MS,
-      resolved: false
+      resolved: false,
+      sprite: enemySprites.length ? enemySprites[Math.floor(Math.random() * enemySprites.length)] : null
     };
   }
 
@@ -211,22 +228,34 @@
     });
   }
 
-  function drawTarget(now) {
-    if (!target) return;
-    var scale = targetScale(now);
-    if (scale <= 0) return;
-    var flashing = now < hitFlashUntil;
-    var r = target.r;
-    var dir = target.x < W / 2 ? 1 : -1; // face toward the center of the screen
+  // Offscreen scratch canvas used to build the white-flash version of a
+  // sprite in isolation, so `source-atop` only sees the sprite's own alpha
+  // shape — compositing directly on the main canvas would instead see
+  // whatever else (the background image, etc.) is already painted there.
+  var spriteFlashCanvas = document.createElement('canvas');
+  var spriteFlashCtx = spriteFlashCanvas.getContext('2d');
 
+  function drawSpriteEnemy(sprite, r, flashing) {
+    var size = r * 2.6; // roughly matches the built-in face's visual extent
+    if (flashing) {
+      spriteFlashCanvas.width = size;
+      spriteFlashCanvas.height = size;
+      spriteFlashCtx.drawImage(sprite, 0, 0, size, size);
+      spriteFlashCtx.globalCompositeOperation = 'source-atop';
+      spriteFlashCtx.fillStyle = '#ffffff';
+      spriteFlashCtx.fillRect(0, 0, size, size);
+      spriteFlashCtx.globalCompositeOperation = 'source-over';
+      ctx.drawImage(spriteFlashCanvas, -size / 2, -size / 2, size, size);
+    } else {
+      ctx.drawImage(sprite, -size / 2, -size / 2, size, size);
+    }
+  }
+
+  function drawBuiltInFace(r, flashing) {
     var skin = flashing ? '#ffffff' : '#d9a066';
     var skinShade = flashing ? '#eeeeee' : '#b9824f';
     var hair = flashing ? '#ffffff' : '#4a3728';
     var hairShade = flashing ? '#eeeeee' : '#332319';
-
-    ctx.save();
-    ctx.translate(target.x, target.y);
-    ctx.scale(dir * scale, scale); // mirror to face center, and grow/shrink for the pop-up/down animation
 
     // faceted low-poly head silhouette: skin (lower/front) + hair (upper/back)
     ctx.beginPath();
@@ -295,6 +324,25 @@
     ctx.lineWidth = 2;
     ctx.strokeStyle = flashing ? '#ccc' : '#7a4a3a';
     ctx.stroke();
+  }
+
+  function drawTarget(now) {
+    if (!target) return;
+    var scale = targetScale(now);
+    if (scale <= 0) return;
+    var flashing = now < hitFlashUntil;
+    var r = target.r;
+    var dir = target.x < W / 2 ? 1 : -1; // face toward the center of the screen
+
+    ctx.save();
+    ctx.translate(target.x, target.y);
+    ctx.scale(dir * scale, scale); // mirror to face center, and grow/shrink for the pop-up/down animation
+
+    if (target.sprite && target.sprite.naturalWidth > 0) {
+      drawSpriteEnemy(target.sprite, r, flashing);
+    } else {
+      drawBuiltInFace(r, flashing);
+    }
 
     ctx.restore();
   }
