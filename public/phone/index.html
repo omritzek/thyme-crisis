@@ -2,16 +2,16 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Light Gun — Phone</title>
+<title>Thyme Crisis — Phone</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<link rel="stylesheet" href="/shared/theme.css">
 <style>
   html, body {
     margin: 0;
     padding: 0;
     width: 100%;
     height: 100%;
-    background: #000;
-    color: #eee;
+    color: var(--tc-text);
     font-family: -apple-system, Helvetica, Arial, sans-serif;
     overscroll-behavior: none;
     -webkit-user-select: none;
@@ -31,36 +31,27 @@
   }
   .hidden { display: none !important; }
 
-  h1 { font-size: 20px; font-weight: 500; color: #ccc; margin: 0; }
-  p.hint { color: #999; font-size: 14px; max-width: 320px; line-height: 1.5; margin: 0; }
+  .tc-header {
+    font-size: 26px;
+    margin: 0 0 4px 0;
+  }
+  h1.tc-subhead {
+    font-family: -apple-system, Helvetica, Arial, sans-serif;
+    font-size: 17px;
+    font-weight: 500;
+    color: var(--tc-cream);
+    margin: 0;
+  }
+  p.hint { color: var(--tc-text-dim); font-size: 14px; max-width: 320px; line-height: 1.5; margin: 0; }
 
   #sessionInput {
-    font-size: 32px;
-    letter-spacing: 8px;
-    text-align: center;
+    font-size: 30px;
     width: 220px;
-    padding: 10px;
-    text-transform: uppercase;
-    border-radius: 8px;
-    border: 1px solid #444;
-    background: #1a1a1a;
-    color: #fff;
+    padding: 12px;
   }
-  button {
-    font-size: 18px;
-    padding: 12px 28px;
-    border-radius: 8px;
-    border: none;
-    background: #00b894;
-    color: #fff;
-    font-weight: 600;
-  }
-  button:disabled {
-    background: #444;
-    color: #999;
-  }
+  button { font-size: 15px; }
   #joinError, #statusError {
-    color: #ff6b6b;
+    color: var(--tc-danger);
     font-size: 14px;
     min-height: 18px;
   }
@@ -68,7 +59,7 @@
   .reticle {
     width: 90px;
     height: 90px;
-    border: 3px solid #00ffe1;
+    border: 3px solid var(--tc-accent);
     border-radius: 50%;
     position: relative;
     flex-shrink: 0;
@@ -76,21 +67,27 @@
   .reticle::before, .reticle::after {
     content: '';
     position: absolute;
-    background: #00ffe1;
+    background: var(--tc-accent);
   }
   .reticle::before { left: 50%; top: -14px; width: 3px; height: 28px; transform: translateX(-50%); }
   .reticle::after { top: 50%; left: -14px; width: 28px; height: 3px; transform: translateY(-50%); }
 
   #angleReadout {
     font-variant-numeric: tabular-nums;
-    color: #6cf;
+    color: var(--tc-olive-light);
     font-size: 14px;
+    font-family: 'Courier New', monospace;
+  }
+
+  #invertRow button {
+    font-size: 12px;
+    padding: 8px 14px;
   }
 
   #playScreen {
     position: fixed;
     inset: 0;
-    background: #0b0b0b;
+    background: var(--tc-bg);
     display: none;
     flex-direction: column;
     align-items: center;
@@ -101,69 +98,76 @@
     position: absolute;
     inset: 0;
   }
+  #angleReadoutPlay {
+    font-variant-numeric: tabular-nums;
+    color: var(--tc-olive-light);
+    font-size: 13px;
+    font-family: 'Courier New', monospace;
+  }
   #playHint {
-    color: #777;
-    font-size: 15px;
-    letter-spacing: 1px;
+    font-family: var(--tc-font);
+    color: var(--tc-text-dim);
+    font-size: 14px;
+    letter-spacing: 2px;
   }
   #recalibrateBtn {
     position: absolute;
     top: 20px;
     right: 20px;
-    font-size: 13px;
+    font-size: 12px;
     padding: 8px 14px;
-    background: #333;
   }
   #blockedFlash {
     position: absolute;
     inset: 0;
-    background: rgba(255, 77, 77, 0.25);
+    background: rgba(216, 74, 58, 0.3);
     display: none;
     pointer-events: none;
   }
 </style>
 </head>
-<body>
+<body class="tc-backdrop">
 
   <div id="screenJoin" class="screen">
-    <h1>Join a Light Gun session</h1>
-    <input id="sessionInput" maxlength="4" placeholder="CODE" autocapitalize="characters" autocomplete="off" autocorrect="off">
-    <button id="joinBtn">Join</button>
+    <div class="tc-header tc-title">Thyme Crisis</div>
+    <h1 class="tc-subhead">Join a session</h1>
+    <input id="sessionInput" class="tc-input" maxlength="4" placeholder="CODE" autocapitalize="characters" autocomplete="off" autocorrect="off">
+    <button id="joinBtn" class="tc-btn tc-btn-accent">Join</button>
     <div id="joinError"></div>
   </div>
 
   <div id="screenStatus" class="screen hidden">
-    <h1 id="statusText">Connecting…</h1>
+    <h1 id="statusText" class="tc-subhead">Connecting…</h1>
     <div id="statusError"></div>
-    <button id="retryBtn" class="hidden">Back</button>
+    <button id="retryBtn" class="tc-btn hidden">Back</button>
   </div>
 
   <div id="screenMotion" class="screen hidden">
-    <h1>Enable motion access</h1>
+    <h1 class="tc-subhead">Enable motion access</h1>
     <p class="hint">This phone aims using its built-in motion sensors instead of the camera — point it like a remote and pan/tilt to aim.</p>
-    <button id="motionBtn">Enable Motion Access</button>
+    <button id="motionBtn" class="tc-btn tc-btn-accent">Enable Motion Access</button>
     <div id="motionError"></div>
   </div>
 
   <div id="screenCalibrate" class="screen hidden">
-    <h1>Point at the center of the screen</h1>
+    <h1 class="tc-subhead">Point at the center of the screen</h1>
     <div class="reticle"></div>
     <p class="hint">Hold the phone steady, aimed at the middle of the display, then tap Calibrate.</p>
     <div id="angleReadout">pan 0.0°&nbsp;&nbsp;tilt 0.0°</div>
-    <button id="calibrateBtn">Calibrate</button>
+    <button id="calibrateBtn" class="tc-btn tc-btn-accent">Calibrate</button>
     <p class="hint">If aiming ends up backwards once you're playing, come back here (or use Recalibrate) and flip the affected axis:</p>
-    <div style="display:flex; gap:10px;">
-      <button id="invertPanBtn" style="background:#333; font-size:13px; padding:8px 14px;">Pan: Normal</button>
-      <button id="invertTiltBtn" style="background:#333; font-size:13px; padding:8px 14px;">Tilt: Normal</button>
+    <div id="invertRow" style="display:flex; gap:10px;">
+      <button id="invertPanBtn" class="tc-btn">Pan: Normal</button>
+      <button id="invertTiltBtn" class="tc-btn">Tilt: Normal</button>
     </div>
   </div>
 
   <div id="playScreen">
     <div id="fireCatcher"></div>
     <div class="reticle"></div>
-    <div id="angleReadoutPlay" style="font-variant-numeric: tabular-nums; color:#6cf; font-size:13px;"></div>
+    <div id="angleReadoutPlay"></div>
     <div id="playHint">TAP ANYWHERE TO FIRE</div>
-    <button id="recalibrateBtn">Recalibrate</button>
+    <button id="recalibrateBtn" class="tc-btn">Recalibrate</button>
     <div id="blockedFlash"></div>
   </div>
 
