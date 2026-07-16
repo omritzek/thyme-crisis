@@ -10,15 +10,15 @@
   // Fixed spots (as fractions of the canvas) where enemies pop up from —
   // picked to line up with playground features in the background image
   // (tunnel slide opening, climbing panel, dome roof, swing seat, benches).
-  // Nudge these if they don't quite land on the right spot once the actual
-  // background is in place.
+  // Checked against the actual background once it was added; still eyeballed
+  // rather than pixel-measured, so further nudges are expected.
   var HIDE_SPOTS = [
     { x: 0.10, y: 0.72 }, // tunnel slide opening
-    { x: 0.30, y: 0.38 }, // purple climbing panel window
-    { x: 0.62, y: 0.24 }, // orange dome roof
-    { x: 0.84, y: 0.52 }, // swing seat
-    { x: 0.08, y: 0.76 }, // left bench
-    { x: 0.78, y: 0.76 }  // right bench
+    { x: 0.30, y: 0.36 }, // purple climbing panel window
+    { x: 0.61, y: 0.20 }, // orange dome roof
+    { x: 0.85, y: 0.40 }, // swing seat
+    { x: 0.11, y: 0.80 }, // left bench
+    { x: 0.83, y: 0.80 }  // right bench
   ];
   var POP_UP_MS = 180;
   var POP_DOWN_MS = 150;
@@ -58,10 +58,18 @@
   var gameOverAt = 0;
   var paired = false;
 
+  // Background image — whatever's sitting in public/display/assets/ (any
+  // name, doesn't have to be exactly "playground.jpg"). Falls back to a
+  // plain dark background if nothing's there.
   var bgImage = new Image();
   var bgReady = false;
   bgImage.onload = function () { bgReady = true; };
-  bgImage.src = '/display/assets/playground.jpg';
+  fetch('/api/background-image')
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      if (data.url) bgImage.src = data.url;
+    })
+    .catch(function () { /* background is optional; plain dark fallback still works */ });
 
   // Optional enemy sprite images — if the server finds any in
   // public/display/assets/enemies/, use those instead of the built-in

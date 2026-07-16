@@ -60,15 +60,20 @@ which prints every LAN address it's reachable on.
 
 ## Customizing the visuals
 
-- **Background**: drop an image at `public/display/assets/playground.jpg` — see
+- **Background**: drop an image directly in `public/display/assets/` — any
+  filename, any of `.png`/`.jpg`/`.jpeg`/`.webp`. See
   `public/display/assets/README.md` for details. Falls back to a plain dark
-  background if it's not there.
+  background if nothing's there.
 - **Enemy sprites**: drop PNG images (transparent background) into
   `public/display/assets/enemies/` — see `public/display/assets/enemies/README.md`
   for exact requirements. No restart needed beyond a page reload; the display
   asks the server what's in that folder on load, and picks a random one per
   spawn if there's more than one. Falls back to a built-in drawn face if the
   folder is empty.
+
+Both are auto-detected by the server (`GET /api/background-image` and
+`GET /api/enemy-sprites`) — you never need to edit code or update a filename
+in `display.js` to swap art.
 
 ## Project structure
 
@@ -80,7 +85,7 @@ which prints every LAN address it's reachable on.
     index.html
     display.js       # game state, rendering, hit detection
     /assets
-      playground.jpg # background image (not checked in by default — see assets/README.md)
+      *.jpg/png       # background image, any filename (not checked in by default — see assets/README.md)
       /enemies        # optional enemy sprite images (see enemies/README.md) — empty folder is fine
   /phone
     index.html
@@ -100,16 +105,19 @@ package.json
   state. Every connection attempt and its outcome is logged to the terminal, which
   is the fastest way to debug a pairing that won't complete.
 - **Display client**: owns all game state — score, shots, lives, and the current
-  enemy. Renders a fixed 1280×720 logical canvas with `assets/playground.jpg` as a
-  cover-fit background (falls back to a plain dark background if that file isn't
-  present). An enemy spawns on a fixed cadence (`SPAWN_INTERVAL_MS`, 5s) at one of
-  a handful of fixed spots positioned over playground features in that background
-  (tunnel opening, climbing panel, dome roof, swing seat, benches — see
-  `HIDE_SPOTS` in `display.js`). Each enemy has a fixed window
-  (`ENEMY_LIFETIME_MS`, 3s) to be shot: a `fire` message landing within its hit
-  radius while it's up kills it (+1 score); if that window expires first, it
-  fires back instead — the player loses a life (with a muzzle-flash effect at the
-  enemy and a red screen flash), and the enemy ducks down either way. Losing all
+  enemy. Renders a fixed 1280×720 logical canvas with whatever image the server
+  finds via `GET /api/background-image` as a cover-fit background (falls back
+  to a plain dark background if none is found). An enemy spawns on a fixed
+  cadence (`SPAWN_INTERVAL_MS`, 5s) at one of a handful of fixed spots
+  positioned over playground features in that background (tunnel opening,
+  climbing panel, dome roof, swing seat, benches — see `HIDE_SPOTS` in
+  `display.js`), rendered either as a sprite from `GET /api/enemy-sprites`
+  (randomly picked per spawn, if any are present) or a built-in drawn face.
+  Each enemy has a fixed window (`ENEMY_LIFETIME_MS`, 3s) to be shot: a `fire`
+  message landing within its hit radius while it's up kills it (+1 score); if
+  that window expires first, it fires back instead — the player loses a life
+  (with a muzzle-flash effect at the enemy and a red screen flash), and the
+  enemy ducks down either way. Losing all
   starting lives (`STARTING_LIVES`, 3) shows a **GAME OVER** overlay with the
   final score, then auto-restarts after a few seconds. Also renders a live
   crosshair from `aim` messages.

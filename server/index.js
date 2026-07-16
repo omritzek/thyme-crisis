@@ -73,7 +73,8 @@ app.get('/api/qrcode', async (req, res) => {
 // file into public/display/assets/enemies/ is enough to use it — no code
 // change needed. Returns an empty list (not an error) if the folder is
 // missing or empty; the display falls back to its built-in drawn sprite.
-const ENEMY_SPRITE_DIR = path.join(__dirname, '../public/display/assets/enemies');
+const ASSETS_DIR = path.join(__dirname, '../public/display/assets');
+const ENEMY_SPRITE_DIR = path.join(ASSETS_DIR, 'enemies');
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp']);
 
 app.get('/api/enemy-sprites', async (req, res) => {
@@ -86,6 +87,24 @@ app.get('/api/enemy-sprites', async (req, res) => {
     res.json({ sprites: files });
   } catch (err) {
     res.json({ sprites: [] });
+  }
+});
+
+// Finds whatever background image is sitting directly in
+// public/display/assets/ (any name, any of the supported extensions) —
+// dropping a file in there is enough, it doesn't have to be named
+// exactly "playground.jpg". Ignores the enemies/ subfolder. Returns
+// { url: null } (not an error) if nothing is found.
+app.get('/api/background-image', async (req, res) => {
+  try {
+    const entries = await fs.readdir(ASSETS_DIR, { withFileTypes: true });
+    const match = entries
+      .filter((e) => e.isFile() && IMAGE_EXTENSIONS.has(path.extname(e.name).toLowerCase()))
+      .map((e) => e.name)
+      .sort()[0];
+    res.json({ url: match ? `/display/assets/${match}` : null });
+  } catch (err) {
+    res.json({ url: null });
   }
 });
 
