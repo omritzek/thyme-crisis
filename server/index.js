@@ -74,54 +74,81 @@ app.get('/api/qrcode', async (req, res) => {
 // change needed. Returns an empty list (not an error) if the folder is
 // missing or empty; the display falls back to its built-in drawn sprite.
 //
-// A file named "<name>-hit.<ext>" is treated as the hit-reaction pose for
-// the base sprite "<name>.<ext>" and paired with it rather than listed as
-// its own independent spawnable sprite. A "-hit" file with no matching base
-// file is just ignored.
+// A file named "<name>-hit" (with or without an extension) is treated as
+// the hit-reaction pose for the base sprite "<name>" and paired with it
+// rather than listed as its own independent spawnable sprite. A "-hit"
+// file with no matching base file is just ignored.
+//
+// Files are identified as images by sniffing their actual bytes (PNG/JPEG/
+// WEBP signatures), not by trusting the filename's extension — tools like
+// Photopea's export dialog, or a quick manual rename, can easily leave a
+// real image file with no extension (or the wrong one), and requiring a
+// specific extension there just means "my sprite doesn't show up" for no
+// reason a player would guess.
 const ASSETS_DIR = path.join(__dirname, '../public/display/assets');
 const ENEMY_SPRITE_DIR = path.join(ASSETS_DIR, 'enemies');
-const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp']);
+
+async function sniffImageType(filePath) {
+  let handle;
+  try {
+    handle = await fs.open(filePath, 'r');
+    const buf = Buffer.alloc(12);
+    const { bytesRead } = await handle.read(buf, 0, 12, 0);
+    if (bytesRead >= 8 && buf.slice(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'png';
+    if (bytesRead >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'jpeg';
+    if (bytesRead >= 12 && buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP') return 'webp';
+    return null;
+  } catch (err) {
+    return null;
+  } finally {
+    if (handle) await handle.close();
+  }
+}
+
+async function listImageFiles(dirPath) {
+  let entries;
+  try {
+    entries = await fs.readdir(dirPath, { withFileTypes: true });
+  } catch (err) {
+    return [];
+  }
+  const candidates = entries.filter((e) => e.isFile());
+  const checks = await Promise.all(candidates.map((e) => sniffImageType(path.join(dirPath, e.name))));
+  return candidates.filter((e, i) => checks[i]).map((e) => e.name);
+}
+
+function stemOf(name) {
+  const ext = path.extname(name);
+  return ext ? name.slice(0, -ext.length) : name;
+}
 
 app.get('/api/enemy-sprites', async (req, res) => {
-  try {
-    const entries = await fs.readdir(ENEMY_SPRITE_DIR);
-    const imageFiles = entries.filter((name) => IMAGE_EXTENSIONS.has(path.extname(name).toLowerCase()));
-    const byName = new Set(imageFiles);
+  const names = await listImageFiles(ENEMY_SPRITE_DIR);
+  const stemToName = new Map(names.map((n) => [stemOf(n).toLowerCase(), n]));
 
-    const sprites = imageFiles
-      .filter((name) => !/-hit\.[^.]+$/i.test(name))
-      .sort()
-      .map((name) => {
-        const ext = path.extname(name);
-        const hitName = name.slice(0, -ext.length) + '-hit' + ext;
-        return {
-          base: `/display/assets/enemies/${name}`,
-          hit: byName.has(hitName) ? `/display/assets/enemies/${hitName}` : null
-        };
-      });
+  const sprites = names
+    .filter((name) => !stemOf(name).toLowerCase().endsWith('-hit'))
+    .sort()
+    .map((name) => {
+      const hitName = stemToName.get((stemOf(name) + '-hit').toLowerCase());
+      return {
+        base: `/display/assets/enemies/${encodeURIComponent(name)}`,
+        hit: hitName ? `/display/assets/enemies/${encodeURIComponent(hitName)}` : null
+      };
+    });
 
-    res.json({ sprites });
-  } catch (err) {
-    res.json({ sprites: [] });
-  }
+  res.json({ sprites });
 });
 
 // Finds whatever background image is sitting directly in
-// public/display/assets/ (any name, any of the supported extensions) —
-// dropping a file in there is enough, it doesn't have to be named
-// exactly "playground.jpg". Ignores the enemies/ subfolder. Returns
-// { url: null } (not an error) if nothing is found.
+// public/display/assets/ (any name, any extension or none) — dropping a
+// file in there is enough, it doesn't have to be named exactly
+// "playground.jpg". Ignores the enemies/ subfolder. Returns { url: null }
+// (not an error) if nothing is found.
 app.get('/api/background-image', async (req, res) => {
-  try {
-    const entries = await fs.readdir(ASSETS_DIR, { withFileTypes: true });
-    const match = entries
-      .filter((e) => e.isFile() && IMAGE_EXTENSIONS.has(path.extname(e.name).toLowerCase()))
-      .map((e) => e.name)
-      .sort()[0];
-    res.json({ url: match ? `/display/assets/${match}` : null });
-  } catch (err) {
-    res.json({ url: null });
-  }
+  const names = await listImageFiles(ASSETS_DIR);
+  const match = names.sort()[0];
+  res.json({ url: match ? `/display/assets/${encodeURIComponent(match)}` : null });
 });
 
 app.use(express.static(path.join(__dirname, '../public')));
