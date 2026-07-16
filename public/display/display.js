@@ -4,6 +4,7 @@
   var CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no I, O, 0, 1
   var SAFE_AREA = { xMin: 180, xMax: 1100, yMin: 180, yMax: 560 };
   var TARGET_RADIUS = 36;
+  var TARGET_SPEED = 70; // logical px/sec — kept slow so tracking accuracy is easy to judge
   var HIT_FORGIVENESS = 15;
   var HIT_FLASH_MS = 150;
   var MISS_FLASH_MS = 300;
@@ -30,6 +31,7 @@
   var missFlashes = [];
   var hitFlashUntil = 0;
   var paired = false;
+  var lastFrameTime = null;
 
   function generateSessionCode() {
     var code = '';
@@ -58,11 +60,24 @@
   }
 
   function spawnTarget() {
+    var angle = Math.random() * Math.PI * 2;
     target = {
       x: SAFE_AREA.xMin + Math.random() * (SAFE_AREA.xMax - SAFE_AREA.xMin),
       y: SAFE_AREA.yMin + Math.random() * (SAFE_AREA.yMax - SAFE_AREA.yMin),
-      r: TARGET_RADIUS
+      r: TARGET_RADIUS,
+      vx: Math.cos(angle) * TARGET_SPEED,
+      vy: Math.sin(angle) * TARGET_SPEED
     };
+  }
+
+  function updateTarget(dt) {
+    if (!target) return;
+    target.x += target.vx * dt;
+    target.y += target.vy * dt;
+    if (target.x < SAFE_AREA.xMin) { target.x = SAFE_AREA.xMin; target.vx = Math.abs(target.vx); }
+    if (target.x > SAFE_AREA.xMax) { target.x = SAFE_AREA.xMax; target.vx = -Math.abs(target.vx); }
+    if (target.y < SAFE_AREA.yMin) { target.y = SAFE_AREA.yMin; target.vy = Math.abs(target.vy); }
+    if (target.y > SAFE_AREA.yMax) { target.y = SAFE_AREA.yMax; target.vy = -Math.abs(target.vy); }
   }
 
   function handleFire(msg) {
@@ -77,7 +92,6 @@
       if (dist <= target.r + HIT_FORGIVENESS) {
         score++;
         hitFlashUntil = now + HIT_FLASH_MS;
-        setTimeout(spawnTarget, HIT_FLASH_MS);
         return;
       }
     }
@@ -127,13 +141,47 @@
   function drawTarget(now) {
     if (!target) return;
     var flashing = now < hitFlashUntil;
+    var facingRight = target.vx >= 0;
+    var bodyColor = flashing ? '#ffffff' : '#f6c744';
+    var billColor = flashing ? '#ffffff' : '#e8811a';
+    var r = target.r;
+    var dir = facingRight ? 1 : -1;
+
+    ctx.save();
+    ctx.translate(target.x, target.y);
+
+    // body
     ctx.beginPath();
-    ctx.arc(target.x, target.y, target.r, 0, Math.PI * 2);
-    ctx.fillStyle = flashing ? '#ffffff' : '#e8433d';
+    ctx.ellipse(0, 0, r * 1.05, r * 0.72, 0, 0, Math.PI * 2);
+    ctx.fillStyle = bodyColor;
     ctx.fill();
-    ctx.lineWidth = 4;
-    ctx.strokeStyle = '#7a1512';
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = '#8a6a12';
     ctx.stroke();
+
+    // head
+    ctx.beginPath();
+    ctx.arc(dir * r * 0.62, -r * 0.45, r * 0.48, 0, Math.PI * 2);
+    ctx.fillStyle = bodyColor;
+    ctx.fill();
+    ctx.stroke();
+
+    // bill
+    ctx.beginPath();
+    ctx.moveTo(dir * r * 0.95, -r * 0.45);
+    ctx.lineTo(dir * r * 1.5, -r * 0.32);
+    ctx.lineTo(dir * r * 0.95, -r * 0.2);
+    ctx.closePath();
+    ctx.fillStyle = billColor;
+    ctx.fill();
+
+    // eye
+    ctx.beginPath();
+    ctx.arc(dir * r * 0.72, -r * 0.55, r * 0.08, 0, Math.PI * 2);
+    ctx.fillStyle = '#2a2a2a';
+    ctx.fill();
+
+    ctx.restore();
   }
 
   function drawMissFlashes(now) {
@@ -181,6 +229,11 @@
 
   function render() {
     var now = performance.now();
+    var dt = lastFrameTime === null ? 0 : Math.min((now - lastFrameTime) / 1000, 0.1);
+    lastFrameTime = now;
+
+    if (paired) updateTarget(dt);
+
     ctx.clearRect(0, 0, W, H);
     ctx.fillStyle = '#111';
     ctx.fillRect(0, 0, W, H);
