@@ -2,12 +2,30 @@
   'use strict';
 
   var CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no I, O, 0, 1
-  var SAFE_AREA = { xMin: 60, xMax: 1220, yMin: 70, yMax: 680 }; // margin is just for the HUD text and canvas edges now that there are no corner markers to avoid
   var TARGET_RADIUS = 36;
-  var TARGET_SPEED = 70; // logical px/sec — kept slow so tracking accuracy is easy to judge
   var HIT_FORGIVENESS = 15;
   var HIT_FLASH_MS = 150;
   var MISS_FLASH_MS = 300;
+
+  // Fixed spots (as fractions of the canvas) where the target pops up from —
+  // picked to line up with playground features in the background image
+  // (tunnel slide opening, climbing panel, dome roof, swing seat, benches).
+  // Nudge these if they don't quite land on the right spot once the actual
+  // background is in place.
+  var HIDE_SPOTS = [
+    { x: 0.10, y: 0.72 }, // tunnel slide opening
+    { x: 0.30, y: 0.38 }, // purple climbing panel window
+    { x: 0.62, y: 0.24 }, // orange dome roof
+    { x: 0.84, y: 0.52 }, // swing seat
+    { x: 0.08, y: 0.76 }, // left bench
+    { x: 0.78, y: 0.76 }  // right bench
+  ];
+  var POP_UP_MS = 180;
+  var POP_DOWN_MS = 150;
+  var VISIBLE_MIN_MS = 2200;
+  var VISIBLE_MAX_MS = 3600;
+  var HIDDEN_MIN_MS = 500;
+  var HIDDEN_MAX_MS = 1200;
 
   var pairingEl = document.getElementById('pairing');
   var stageEl = document.getElementById('stage');
@@ -26,11 +44,17 @@
   var score = 0;
   var shots = 0;
   var target = null;
+  var lastSpotIndex = -1;
+  var nextPopAt = 0;
   var crosshair = { x: W / 2, y: H / 2, visible: false };
   var missFlashes = [];
   var hitFlashUntil = 0;
   var paired = false;
-  var lastFrameTime = null;
+
+  var bgImage = new Image();
+  var bgReady = false;
+  bgImage.onload = function () { bgReady = true; };
+  bgImage.src = '/display/assets/playground.jpg';
 
   function generateSessionCode() {
     var code = '';
@@ -58,25 +82,50 @@
     stageEl.classList.remove('hidden');
   }
 
-  function spawnTarget() {
-    var angle = Math.random() * Math.PI * 2;
+  function scheduleNextPop(now, delayMs) {
+    nextPopAt = now + delayMs;
+  }
+
+  function popUpTarget(now) {
+    var idx;
+    do {
+      idx = Math.floor(Math.random() * HIDE_SPOTS.length);
+    } while (idx === lastSpotIndex && HIDE_SPOTS.length > 1);
+    lastSpotIndex = idx;
+    var spot = HIDE_SPOTS[idx];
     target = {
-      x: SAFE_AREA.xMin + Math.random() * (SAFE_AREA.xMax - SAFE_AREA.xMin),
-      y: SAFE_AREA.yMin + Math.random() * (SAFE_AREA.yMax - SAFE_AREA.yMin),
+      x: spot.x * W,
+      y: spot.y * H,
       r: TARGET_RADIUS,
-      vx: Math.cos(angle) * TARGET_SPEED,
-      vy: Math.sin(angle) * TARGET_SPEED
+      state: 'popping-up',
+      stateStartedAt: now,
+      visibleUntil: 0
     };
   }
 
-  function updateTarget(dt) {
-    if (!target) return;
-    target.x += target.vx * dt;
-    target.y += target.vy * dt;
-    if (target.x < SAFE_AREA.xMin) { target.x = SAFE_AREA.xMin; target.vx = Math.abs(target.vx); }
-    if (target.x > SAFE_AREA.xMax) { target.x = SAFE_AREA.xMax; target.vx = -Math.abs(target.vx); }
-    if (target.y < SAFE_AREA.yMin) { target.y = SAFE_AREA.yMin; target.vy = Math.abs(target.vy); }
-    if (target.y > SAFE_AREA.yMax) { target.y = SAFE_AREA.yMax; target.vy = -Math.abs(target.vy); }
+  function targetScale(now) {
+    if (!target) return 0;
+    if (target.state === 'popping-up') return Math.min(1, (now - target.stateStartedAt) / POP_UP_MS);
+    if (target.state === 'popping-down') return Math.max(0, 1 - (now - target.stateStartedAt) / POP_DOWN_MS);
+    return 1;
+  }
+
+  function updateTarget(now) {
+    if (!target) {
+      if (now >= nextPopAt) popUpTarget(now);
+      return;
+    }
+    if (target.state === 'popping-up' && now - target.stateStartedAt >= POP_UP_MS) {
+      target.state = 'visible';
+      target.stateStartedAt = now;
+      target.visibleUntil = now + VISIBLE_MIN_MS + Math.random() * (VISIBLE_MAX_MS - VISIBLE_MIN_MS);
+    } else if (target.state === 'visible' && now >= target.visibleUntil) {
+      target.state = 'popping-down';
+      target.stateStartedAt = now;
+    } else if (target.state === 'popping-down' && now - target.stateStartedAt >= POP_DOWN_MS) {
+      target = null;
+      scheduleNextPop(now, HIDDEN_MIN_MS + Math.random() * (HIDDEN_MAX_MS - HIDDEN_MIN_MS));
+    }
   }
 
   function handleFire(msg) {
@@ -84,13 +133,15 @@
     var px = msg.x * W;
     var py = msg.y * H;
     var now = performance.now();
-    if (target) {
+    if (target && target.state === 'visible') {
       var dx = px - target.x;
       var dy = py - target.y;
       var dist = Math.sqrt(dx * dx + dy * dy);
       if (dist <= target.r + HIT_FORGIVENESS) {
         score++;
         hitFlashUntil = now + HIT_FLASH_MS;
+        target.state = 'popping-down';
+        target.stateStartedAt = now;
         return;
       }
     }
@@ -109,7 +160,9 @@
         ws.send(JSON.stringify({ type: PROTOCOL.MSG_SESSION_READY }));
         score = 0;
         shots = 0;
-        spawnTarget();
+        target = null;
+        lastSpotIndex = -1;
+        scheduleNextPop(performance.now(), 300);
         showGame();
       } else if (msg.type === PROTOCOL.MSG_PEER_DISCONNECTED) {
         showPairing();
@@ -130,10 +183,11 @@
 
   function drawTarget(now) {
     if (!target) return;
+    var scale = targetScale(now);
+    if (scale <= 0) return;
     var flashing = now < hitFlashUntil;
-    var facingRight = target.vx >= 0;
     var r = target.r;
-    var dir = facingRight ? 1 : -1;
+    var dir = target.x < W / 2 ? 1 : -1; // face toward the center of the screen
 
     var skin = flashing ? '#ffffff' : '#d9a066';
     var skinShade = flashing ? '#eeeeee' : '#b9824f';
@@ -142,7 +196,7 @@
 
     ctx.save();
     ctx.translate(target.x, target.y);
-    ctx.scale(dir, 1); // mirror the whole face toward the direction of travel
+    ctx.scale(dir * scale, scale); // mirror to face center, and grow/shrink for the pop-up/down animation
 
     // faceted low-poly head silhouette: skin (lower/front) + hair (upper/back)
     ctx.beginPath();
@@ -254,20 +308,32 @@
     var text = 'Score: ' + score + '    Shots: ' + shots + '    Accuracy: ' + accuracy + '%';
     ctx.font = '24px -apple-system, Helvetica, Arial, sans-serif';
     ctx.textAlign = 'center';
+    var textWidth = ctx.measureText(text).width;
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    ctx.fillRect(W / 2 - textWidth / 2 - 16, 10, textWidth + 32, 32);
     ctx.fillStyle = '#eee';
     ctx.fillText(text, W / 2, 34);
   }
 
+  function drawBackground() {
+    if (bgReady) {
+      var scale = Math.max(W / bgImage.naturalWidth, H / bgImage.naturalHeight);
+      var dw = bgImage.naturalWidth * scale;
+      var dh = bgImage.naturalHeight * scale;
+      ctx.drawImage(bgImage, (W - dw) / 2, (H - dh) / 2, dw, dh);
+    } else {
+      ctx.fillStyle = '#111';
+      ctx.fillRect(0, 0, W, H);
+    }
+  }
+
   function render() {
     var now = performance.now();
-    var dt = lastFrameTime === null ? 0 : Math.min((now - lastFrameTime) / 1000, 0.1);
-    lastFrameTime = now;
 
-    if (paired) updateTarget(dt);
+    if (paired) updateTarget(now);
 
     ctx.clearRect(0, 0, W, H);
-    ctx.fillStyle = '#111';
-    ctx.fillRect(0, 0, W, H);
+    drawBackground();
     drawTarget(now);
     drawMissFlashes(now);
     drawCrosshair();

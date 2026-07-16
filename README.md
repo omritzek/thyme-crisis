@@ -67,6 +67,8 @@ which prints every LAN address it's reachable on.
   /display
     index.html
     display.js       # game state, rendering, hit detection
+    /assets
+      playground.jpg # background image (not checked in by default — see assets/README.md)
   /phone
     index.html
     phone.js          # motion sensor calibration, aim computation, input handling
@@ -85,21 +87,33 @@ package.json
   state. Every connection attempt and its outcome is logged to the terminal, which
   is the fastest way to debug a pairing that won't complete.
 - **Display client**: owns all game state — the target's position, score, and shot
-  count. Renders a fixed 1280×720 logical canvas with a single character that
-  drifts slowly around the safe play area, bouncing off its bounds. It resolves
-  hits/misses when it receives `fire` messages and renders a live crosshair from
-  `aim` messages.
+  count. Renders a fixed 1280×720 logical canvas with `assets/playground.jpg` as a
+  cover-fit background (falls back to a plain dark background if that file isn't
+  present). The target pops up at one of a handful of fixed spots positioned over
+  playground features in that background (tunnel opening, climbing panel, dome
+  roof, swing seat, benches — see `HIDE_SPOTS` in `display.js`), stays briefly,
+  then ducks back down and reappears elsewhere. It resolves hits/misses when it
+  receives `fire` messages (only while the target is fully popped up) and renders
+  a live crosshair from `aim` messages.
 - **Phone client**: on pairing, requests motion sensor access
   (`DeviceOrientationEvent.requestPermission()` on iOS 13+; no prompt needed on
-  most Android browsers), then waits for the player to point the phone at the
-  screen and tap **Calibrate**, which records the current compass heading
-  (`alpha`) and front-back tilt (`beta`) as the "aim center" baseline. On every
-  subsequent sensor reading, the angular delta from that baseline is scaled by a
-  fixed degrees-per-screen-width constant (`AIM_RANGE_DEG`, currently 25°) and
-  clamped to produce a normalized `x,y` aim point, sent at ~20/sec. Taps send
-  `fire` with the most recent aim point; a short grace period (400ms) tolerates
-  the sensor jitter that tapping the screen itself causes, so a real tap doesn't
-  silently get swallowed by a one-frame reading blip.
+  most Android browsers). Raw `alpha`/`beta`/`gamma` readings are smoothed with an
+  exponential moving average (raw sensor data is noisy enough to visibly jitter
+  the crosshair otherwise), then converted into the 3D direction the back of the
+  phone points — the same axis a rear camera would point down, i.e. however you'd
+  naturally hold it like a remote aimed at the screen — rather than using the
+  Euler angles directly, since those hit a real gimbal-lock singularity exactly
+  when the phone is held near-vertical (the aiming pose). The player points at the
+  screen and taps **Calibrate**, which records that direction's azimuth/elevation
+  as the "aim center" baseline; every subsequent reading's angular delta from that
+  baseline is scaled by a fixed degrees-per-screen-width constant (`AIM_RANGE_DEG`,
+  currently 25°) and clamped to a normalized `x,y` aim point, sent at ~20/sec.
+  Taps send `fire` with the most recent aim point; a short grace period (400ms)
+  tolerates the sensor jitter that tapping the screen itself causes, so a real tap
+  doesn't silently get swallowed by a one-frame reading blip. Since axis-sign
+  conventions can vary by device/browser, **Invert Pan**/**Invert Tilt** toggles
+  on the calibrate screen (persisted per-device) let the player fix a backwards
+  axis themselves without a code change.
 
 ## Known limitations (by design, see PRD)
 
