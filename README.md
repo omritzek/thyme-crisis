@@ -1,10 +1,10 @@
 # Phone Light Gun Game (MVP)
 
-A two-screen, single-player shooting game. A computer displays the game (one static
-target on screen at a time, Duck Hunt style). A phone acts as the gun: hold it up,
-aim at the computer screen using the phone's rear camera, and tap to fire. The phone
-tracks four colored markers at the corners of the display and computes where the
-center of its camera view intersects that plane.
+A two-screen, single-player shooting game. A computer displays the game (a single
+slow-moving target). A phone acts as the gun: hold it up like a remote and pan/tilt
+it to aim, tap the screen to fire. Aiming uses the phone's built-in motion sensors
+(`DeviceOrientationEvent`) calibrated to a baseline pointing direction — there's no
+camera or visual markers involved.
 
 No app install — both the display and the phone open a web page in the browser.
 They connect through a small local WebSocket relay server.
@@ -13,7 +13,8 @@ They connect through a small local WebSocket relay server.
 
 - Node.js 18+
 - A computer and a phone on the **same local network**
-- A modern mobile browser with rear camera access
+- A phone browser with motion sensor support (iOS Safari, Android Chrome — most
+  modern mobile browsers)
 
 ## Setup
 
@@ -25,9 +26,9 @@ npm start
 The server listens on port 3000 by default (override with `PORT=xxxx npm start`),
 and serves everything over **HTTPS with a self-signed certificate** — generated
 fresh each time the server starts, valid for `localhost`, `127.0.0.1`, and every
-LAN IP address detected on the machine. This is required because mobile browsers
-(iOS Safari/WebKit in particular) block camera access (`getUserMedia`) on any page
-loaded over plain `http://`, even on a local network.
+LAN IP address detected on the machine. This is required because iOS Safari gates
+motion sensor access (`DeviceOrientationEvent.requestPermission`) behind a secure
+context, same as it does for camera access.
 
 Because the certificate isn't from a trusted CA, **every device will show a
 "connection is not private" warning the first time it loads the page** — this is
@@ -42,10 +43,16 @@ website") on both the computer and the phone.
 2. On the phone, open `https://<computer-lan-ip>:3000/phone`, or scan the QR code
    (the QR always encodes an `https://` link), accept the certificate warning, and
    tap **Join** (the code is pre-filled if you scanned the QR).
-3. Grant camera access when prompted. Point the rear camera at the computer screen
-   until the "Detecting markers" overlay shows 4/4 and the **Start** button enables.
-4. Tap **Start**, then aim by physically moving the phone (the crosshair overlay
-   marks the phone's fixed aim point) and tap anywhere on the phone screen to fire.
+3. Tap **Enable Motion Access** (iOS will show a native permission prompt the
+   first time).
+4. Hold the phone pointed at the middle of the display, hold it steady, and tap
+   **Calibrate**. This records the phone's current pan/tilt as "aim center" — it
+   does not need to see anything on screen, it just needs to be pointed at it.
+5. Aim by physically panning/tilting the phone (moving it left/right pans the
+   crosshair left/right; tilting the top of the phone up/down moves it up/down),
+   and tap anywhere on the phone screen to fire. If the crosshair feels drifted
+   or off-center, tap **Recalibrate** (top-right during play) without leaving the
+   game.
 
 Find your computer's LAN IP with `ipconfig getifaddr en0` (macOS), `hostname -I`
 (Linux), or `ipconfig` (Windows) — or just read it from the server's startup log,
@@ -62,7 +69,7 @@ which prints every LAN address it's reachable on.
     display.js       # game state, rendering, hit detection
   /phone
     index.html
-    phone.js          # camera access, marker detection, homography, input handling
+    phone.js          # motion sensor calibration, aim computation, input handling
   /shared
     protocol.js       # message type constants shared by both clients
 package.json
@@ -78,29 +85,36 @@ package.json
   state. Every connection attempt and its outcome is logged to the terminal, which
   is the fastest way to debug a pairing that won't complete.
 - **Display client**: owns all game state — the target's position, score, and shot
-  count. Renders a fixed 1280×720 logical canvas with four colored corner markers
-  (red/green/blue/yellow, top-left/top-right/bottom-left/bottom-right) that never
-  move. On pairing it sends the phone a `marker_layout` message (exact pixel
-  position of each marker) and a `session_ready` message. It resolves hits/misses
-  when it receives `fire` messages and renders a live crosshair from `aim` messages.
-- **Phone client**: captures the rear camera, downsamples frames to 160×90, and
-  scans for the four marker colors by HSV thresholding to find each one's centroid.
-  With all four camera-space points and their known display-space positions (from
-  `marker_layout`), it solves the 3×3 planar homography via the standard 4-point
-  DLT (an 8×8 linear system solved with Gaussian elimination — no CV library
-  needed). Applying that homography to the camera's fixed center point yields the
-  aim point on the display, sent as `aim` messages at ~20/sec. Taps send `fire`
-  with the last computed aim point. If fewer than four markers are detected in a
-  frame, tracking is marked lost: no new `aim` is sent and firing is disabled until
-  all four markers are reacquired.
+  count. Renders a fixed 1280×720 logical canvas with a single character that
+  drifts slowly around the safe play area, bouncing off its bounds. It resolves
+  hits/misses when it receives `fire` messages and renders a live crosshair from
+  `aim` messages.
+- **Phone client**: on pairing, requests motion sensor access
+  (`DeviceOrientationEvent.requestPermission()` on iOS 13+; no prompt needed on
+  most Android browsers), then waits for the player to point the phone at the
+  screen and tap **Calibrate**, which records the current compass heading
+  (`alpha`) and front-back tilt (`beta`) as the "aim center" baseline. On every
+  subsequent sensor reading, the angular delta from that baseline is scaled by a
+  fixed degrees-per-screen-width constant (`AIM_RANGE_DEG`, currently 25°) and
+  clamped to produce a normalized `x,y` aim point, sent at ~20/sec. Taps send
+  `fire` with the most recent aim point; a short grace period (400ms) tolerates
+  the sensor jitter that tapping the screen itself causes, so a real tap doesn't
+  silently get swallowed by a one-frame reading blip.
 
 ## Known limitations (by design, see PRD)
 
-- Tuned for a fixed, controlled distance/lighting — no auto-exposure compensation.
-- No moving targets, multiplayer, or persistence — this is an MVP proving the
-  aiming interaction, not a shippable game.
+- No moving-target-avoidance, multiplayer, or persistence — this is an MVP
+  proving the aiming interaction, not a shippable game.
 - The self-signed certificate means every device must click through a browser
   security warning once per server restart (the cert is regenerated fresh each
   time `npm start` runs). If you'd rather not see that warning at all, generate a
   locally-trusted certificate with [mkcert](https://github.com/FiloSottile/mkcert)
   and pass its key/cert paths in instead — not needed for normal use.
+- Motion-sensor aiming has no absolute ground truth (unlike the camera+marker
+  approach it replaced) — it's entirely relative to wherever you were pointing at
+  calibration time. If you physically move to a different spot relative to the
+  screen after calibrating, or the crosshair drifts over a long play session, tap
+  **Recalibrate** while pointed back at center.
+- `AIM_RANGE_DEG` in `phone.js` is a fixed sensitivity constant, not adaptive to
+  distance from the screen — if aiming feels too twitchy or too sluggish, that's
+  the value to tune.

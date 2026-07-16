@@ -32,6 +32,7 @@
   .hidden { display: none !important; }
 
   h1 { font-size: 20px; font-weight: 500; color: #ccc; margin: 0; }
+  p.hint { color: #999; font-size: 14px; max-width: 320px; line-height: 1.5; margin: 0; }
 
   #sessionInput {
     font-size: 32px;
@@ -64,57 +65,61 @@
     min-height: 18px;
   }
 
-  #cameraContainer {
+  .reticle {
+    width: 90px;
+    height: 90px;
+    border: 3px solid #00ffe1;
+    border-radius: 50%;
+    position: relative;
+    flex-shrink: 0;
+  }
+  .reticle::before, .reticle::after {
+    content: '';
+    position: absolute;
+    background: #00ffe1;
+  }
+  .reticle::before { left: 50%; top: -14px; width: 3px; height: 28px; transform: translateX(-50%); }
+  .reticle::after { top: 50%; left: -14px; width: 28px; height: 3px; transform: translateY(-50%); }
+
+  #angleReadout {
+    font-variant-numeric: tabular-nums;
+    color: #6cf;
+    font-size: 14px;
+  }
+
+  #playScreen {
     position: fixed;
     inset: 0;
-    background: #000;
+    background: #0b0b0b;
     display: none;
-  }
-  #cam {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    background: #000;
-  }
-  #overlay {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    pointer-events: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
   }
   #fireCatcher {
     position: absolute;
     inset: 0;
   }
-  #startBtn {
+  #playHint {
+    color: #777;
+    font-size: 15px;
+    letter-spacing: 1px;
+  }
+  #recalibrateBtn {
     position: absolute;
-    left: 50%;
-    bottom: 48px;
-    transform: translateX(-50%);
+    top: 20px;
+    right: 20px;
+    font-size: 13px;
+    padding: 8px 14px;
+    background: #333;
   }
-  #markerStatus {
+  #blockedFlash {
     position: absolute;
-    left: 50%;
-    bottom: 108px;
-    transform: translateX(-50%);
-    display: flex;
-    gap: 10px;
-  }
-  .markerDot {
-    width: 18px;
-    height: 18px;
-    border-radius: 4px;
-    background: var(--dot-color);
-    opacity: 0.3;
-    border: 2px solid rgba(255,255,255,0.4);
-  }
-  .markerDot.found {
-    opacity: 1;
-    border-color: #fff;
-    box-shadow: 0 0 8px rgba(255,255,255,0.8);
+    inset: 0;
+    background: rgba(255, 77, 77, 0.25);
+    display: none;
+    pointer-events: none;
   }
 </style>
 </head>
@@ -133,17 +138,28 @@
     <button id="retryBtn" class="hidden">Back</button>
   </div>
 
-  <div id="cameraContainer">
-    <video id="cam" playsinline autoplay muted></video>
-    <canvas id="overlay"></canvas>
+  <div id="screenMotion" class="screen hidden">
+    <h1>Enable motion access</h1>
+    <p class="hint">This phone aims using its built-in motion sensors instead of the camera — point it like a remote and pan/tilt to aim.</p>
+    <button id="motionBtn">Enable Motion Access</button>
+    <div id="motionError"></div>
+  </div>
+
+  <div id="screenCalibrate" class="screen hidden">
+    <h1>Point at the center of the screen</h1>
+    <div class="reticle"></div>
+    <p class="hint">Hold the phone steady, aimed at the middle of the display, then tap Calibrate.</p>
+    <div id="angleReadout">pan 0.0°&nbsp;&nbsp;tilt 0.0°</div>
+    <button id="calibrateBtn">Calibrate</button>
+  </div>
+
+  <div id="playScreen">
+    <div class="reticle"></div>
+    <div id="angleReadoutPlay" style="font-variant-numeric: tabular-nums; color:#6cf; font-size:13px;"></div>
+    <div id="playHint">TAP ANYWHERE TO FIRE</div>
+    <button id="recalibrateBtn">Recalibrate</button>
+    <div id="blockedFlash"></div>
     <div id="fireCatcher"></div>
-    <div id="markerStatus">
-      <span class="markerDot" data-id="tl" style="--dot-color:#FF0000"></span>
-      <span class="markerDot" data-id="tr" style="--dot-color:#00FF00"></span>
-      <span class="markerDot" data-id="bl" style="--dot-color:#0000FF"></span>
-      <span class="markerDot" data-id="br" style="--dot-color:#FFFF00"></span>
-    </div>
-    <button id="startBtn" disabled>Detecting markers… (0/4)</button>
   </div>
 
   <script src="/shared/protocol.js"></script>

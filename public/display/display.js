@@ -2,7 +2,7 @@
   'use strict';
 
   var CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no I, O, 0, 1
-  var SAFE_AREA = { xMin: 180, xMax: 1100, yMin: 180, yMax: 560 };
+  var SAFE_AREA = { xMin: 60, xMax: 1220, yMin: 70, yMax: 680 }; // margin is just for the HUD text and canvas edges now that there are no corner markers to avoid
   var TARGET_RADIUS = 36;
   var TARGET_SPEED = 70; // logical px/sec — kept slow so tracking accuracy is easy to judge
   var HIT_FORGIVENESS = 15;
@@ -19,7 +19,6 @@
 
   var W = PROTOCOL.LOGICAL_WIDTH;
   var H = PROTOCOL.LOGICAL_HEIGHT;
-  var markerRects = protocolMarkerRects();
 
   var sessionCode = generateSessionCode();
   var ws = null;
@@ -107,7 +106,6 @@
       try { msg = JSON.parse(evt.data); } catch (e) { return; }
 
       if (msg.type === PROTOCOL.MSG_PHONE_CONNECTED) {
-        ws.send(JSON.stringify(protocolMarkerLayout()));
         ws.send(JSON.stringify({ type: PROTOCOL.MSG_SESSION_READY }));
         score = 0;
         shots = 0;
@@ -127,14 +125,6 @@
     ws.addEventListener('close', function () {
       showPairing();
       setTimeout(connect, 1500);
-    });
-  }
-
-  function drawMarkers() {
-    Object.keys(markerRects).forEach(function (id) {
-      var r = markerRects[id];
-      ctx.fillStyle = PROTOCOL.MARKER_COLORS[id];
-      ctx.fillRect(r.x, r.y, r.w, r.h);
     });
   }
 
@@ -278,7 +268,6 @@
     ctx.clearRect(0, 0, W, H);
     ctx.fillStyle = '#111';
     ctx.fillRect(0, 0, W, H);
-    drawMarkers();
     drawTarget(now);
     drawMissFlashes(now);
     drawCrosshair();
