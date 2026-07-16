@@ -5,6 +5,17 @@
   var SEND_INTERVAL_MS = 50; // ~20/sec, matches the protocol's throttle target
   var FIRE_GRACE_MS = 400; // tolerate the brief sensor jitter a screen tap itself causes
 
+  // --- Ammo / reload ---
+  // Six shots, then the player has to physically reload by tilting the
+  // phone down (like lowering the muzzle) and holding it there briefly —
+  // measured relative to the calibrated baseline so it works regardless of
+  // how the phone happens to be held or where the screen sits.
+  var AMMO_MAX = 6;
+  var RELOAD_TILT_DELTA_DEG = -50; // this far below the calibrated baseline counts as "pointed down"
+  var RELOAD_HOLD_MS = 400;
+  var ammo = AMMO_MAX;
+  var reloadHoldStartedAt = null;
+
   // --- DOM ---
   var screenJoin = document.getElementById('screenJoin');
   var screenStatus = document.getElementById('screenStatus');
@@ -28,6 +39,8 @@
   var recalibrateBtn = document.getElementById('recalibrateBtn');
   var fireCatcher = document.getElementById('fireCatcher');
   var blockedFlash = document.getElementById('blockedFlash');
+  var ammoReadout = document.getElementById('ammoReadout');
+  var playHint = document.getElementById('playHint');
 
   // --- state ---
   var appState = 'join'; // join | connecting | motion-permission | calibrating | playing
@@ -262,11 +275,26 @@
     requestAnimationFrame(updateCalibrateReadout);
   }
 
+  function updateAmmoUi() {
+    ammoReadout.textContent = 'AMMO ' + Math.max(0, ammo) + '/' + AMMO_MAX;
+    ammoReadout.classList.toggle('empty', ammo <= 0);
+    if (ammo <= 0) {
+      playHint.textContent = 'POINT PHONE DOWN TO RELOAD';
+      playHint.classList.add('reload-hint');
+    } else {
+      playHint.textContent = 'TAP ANYWHERE TO FIRE';
+      playHint.classList.remove('reload-hint');
+    }
+  }
+
   function calibrate() {
     if (!latestOrientation) return;
     baseline = azimuthElevation(pointingVector(latestOrientation));
     appState = 'playing';
     showScreen('play');
+    ammo = AMMO_MAX;
+    reloadHoldStartedAt = null;
+    updateAmmoUi();
     if (sendIntervalId) clearInterval(sendIntervalId);
     sendIntervalId = setInterval(tick, SEND_INTERVAL_MS);
 
@@ -290,6 +318,19 @@
     var ae = azimuthElevation(pointingVector(latestOrientation));
     var deltaPan = angleDelta(ae.azimuth, baseline.azimuth);
     var deltaTilt = ae.elevation - baseline.elevation;
+
+    if (ammo <= 0) {
+      if (deltaTilt <= RELOAD_TILT_DELTA_DEG) {
+        if (reloadHoldStartedAt === null) reloadHoldStartedAt = performance.now();
+        else if (performance.now() - reloadHoldStartedAt >= RELOAD_HOLD_MS) {
+          ammo = AMMO_MAX;
+          reloadHoldStartedAt = null;
+          updateAmmoUi();
+        }
+      } else {
+        reloadHoldStartedAt = null;
+      }
+    }
 
     // Derived signs (verified against the pointing-vector math): turning the
     // phone right decreases azimuth, so aimX moves the opposite way from
@@ -347,12 +388,19 @@
 
   fireCatcher.addEventListener('pointerdown', function () {
     if (appState !== 'playing') return;
+    if (ammo <= 0) {
+      blockedFlash.style.display = 'block';
+      setTimeout(function () { blockedFlash.style.display = 'none'; }, 150);
+      return;
+    }
     var withinGracePeriod = performance.now() - lastGoodAimAt <= FIRE_GRACE_MS;
     if (!lastAim || !withinGracePeriod) {
       blockedFlash.style.display = 'block';
       setTimeout(function () { blockedFlash.style.display = 'none'; }, 150);
       return;
     }
+    ammo--;
+    updateAmmoUi();
     flashTorch();
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: PROTOCOL.MSG_FIRE, x: lastAim.x, y: lastAim.y }));

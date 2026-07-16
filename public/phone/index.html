@@ -63,6 +63,12 @@
     border-radius: 50%;
     position: relative;
     flex-shrink: 0;
+    /* Purely decorative, but "position: relative" still makes it a positioned
+       element -- on the play screen it sits later in the DOM than the
+       full-screen #fireCatcher (also positioned), so without this it paints
+       on top and silently swallows taps landing on it, which is exactly the
+       screen's visual center where a tap is most likely to land. */
+    pointer-events: none;
   }
   .reticle::before, .reticle::after {
     content: '';
@@ -104,11 +110,24 @@
     font-size: 13px;
     font-family: 'Courier New', monospace;
   }
+  #ammoReadout {
+    font-variant-numeric: tabular-nums;
+    color: var(--tc-cream);
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 1px;
+  }
+  #ammoReadout.empty {
+    color: var(--tc-danger);
+  }
   #playHint {
     font-family: var(--tc-font);
     color: var(--tc-text-dim);
     font-size: 14px;
     letter-spacing: 2px;
+  }
+  #playHint.reload-hint {
+    color: var(--tc-danger);
   }
   #recalibrateBtn {
     position: absolute;
@@ -166,6 +185,7 @@
     <div id="fireCatcher"></div>
     <div class="reticle"></div>
     <div id="angleReadoutPlay"></div>
+    <div id="ammoReadout">AMMO 6/6</div>
     <div id="playHint">TAP ANYWHERE TO FIRE</div>
     <button id="recalibrateBtn" class="tc-btn">Recalibrate</button>
     <div id="blockedFlash"></div>

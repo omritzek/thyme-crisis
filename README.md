@@ -155,7 +155,11 @@ package.json
   control on a camera track — Android Chrome/Edge generally do; **iOS Safari
   never has** (an Apple/WebKit platform restriction, not a bug here), so on
   iPhone the game just plays without it, silently, with no extra permission
-  prompt for a feature that could never work there anyway.
+  prompt for a feature that could never work there anyway. The gun holds 6
+  shots (`AMMO_MAX`); once empty, taps do nothing but flash a "reload" hint
+  until the player tilts the phone down (50°+ below the calibrated baseline,
+  held briefly) to reload back to a full 6 — same aim math already used for
+  aiming, just checking the tilt delta against a different threshold.
 
 ## Deploying it publicly
 
