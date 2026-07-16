@@ -57,6 +57,7 @@
   function backToJoin() {
     if (ws) { try { ws.close(); } catch (e) {} ws = null; }
     if (sendIntervalId) { clearInterval(sendIntervalId); sendIntervalId = null; }
+    stopTorch();
     baseline = null;
     lastAim = null;
     hasCalibratedOnce = false;
@@ -130,11 +131,57 @@
     };
   }
 
+  // --- Camera torch flash on fire ---
+  // A real LED flash on each shot reads as a much more tactile "gunshot"
+  // than a screen effect. This only works where the browser exposes torch
+  // control on a getUserMedia video track at all — iOS Safari/WebKit never
+  // has (an Apple platform restriction, not a bug here), so camera access
+  // is skipped there entirely rather than prompting for a permission that
+  // could never do anything. Android Chrome/Edge generally support it.
+  var IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+  var TORCH_FLASH_MS = 120;
+  var torchTrack = null;
+  var torchOffTimer = null;
+
+  function initTorch() {
+    if (IS_IOS || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } })
+      .then(function (stream) {
+        var track = stream.getVideoTracks()[0];
+        if (!track) return;
+        var caps = track.getCapabilities ? track.getCapabilities() : {};
+        if (!caps.torch) {
+          track.stop();
+          return;
+        }
+        torchTrack = track;
+      })
+      .catch(function () {
+        // No camera, permission denied, or no torch support — the flash is
+        // purely a nice-to-have, so fail silently and keep playing without it.
+      });
+  }
+
+  function flashTorch() {
+    if (!torchTrack) return;
+    if (torchOffTimer) clearTimeout(torchOffTimer);
+    torchTrack.applyConstraints({ advanced: [{ torch: true }] }).catch(function () {});
+    torchOffTimer = setTimeout(function () {
+      torchTrack.applyConstraints({ advanced: [{ torch: false }] }).catch(function () {});
+    }, TORCH_FLASH_MS);
+  }
+
+  function stopTorch() {
+    if (torchOffTimer) { clearTimeout(torchOffTimer); torchOffTimer = null; }
+    if (torchTrack) { try { torchTrack.stop(); } catch (e) {} torchTrack = null; }
+  }
+
   function requestMotionAccess() {
     motionError.textContent = '';
 
     function start() {
       window.addEventListener('deviceorientation', onOrientation);
+      initTorch();
       appState = 'calibrating';
       showScreen('calibrate');
       requestAnimationFrame(updateCalibrateReadout);
@@ -306,6 +353,7 @@
       setTimeout(function () { blockedFlash.style.display = 'none'; }, 150);
       return;
     }
+    flashTorch();
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: PROTOCOL.MSG_FIRE, x: lastAim.x, y: lastAim.y }));
     }

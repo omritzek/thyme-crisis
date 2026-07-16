@@ -2,9 +2,9 @@
   'use strict';
 
   var CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no I, O, 0, 1
-  var TARGET_RADIUS = 36;
+  var TARGET_RADIUS = 72;
   var HIT_FORGIVENESS = 15;
-  var HIT_FLASH_MS = 150;
+  var HIT_HOLD_MS = 450; // how long a killed enemy stays fully visible (showing the hit sprite/flash) before it shrinks away
   var MISS_FLASH_MS = 300;
 
   // Fixed spots (as fractions of the canvas) where enemies pop up from —
@@ -36,6 +36,9 @@
   var qrImgEl = document.getElementById('qrImg');
   var canvas = document.getElementById('game');
   var ctx = canvas.getContext('2d');
+  var pauseOverlayEl = document.getElementById('pauseOverlay');
+  var pauseRestartBtn = document.getElementById('pauseRestartBtn');
+  var pauseQuitBtn = document.getElementById('pauseQuitBtn');
 
   var W = PROTOCOL.LOGICAL_WIDTH;
   var H = PROTOCOL.LOGICAL_HEIGHT;
@@ -52,12 +55,28 @@
   var crosshair = { x: W / 2, y: H / 2, visible: false };
   var missFlashes = [];
   var muzzleFlashes = []; // enemy fired-back effects, at the enemy's position
+  var hitBurstFlashes = []; // bright burst at the impact point on a successful hit
+  var HIT_BURST_MS = 300;
   var hitFlashUntil = 0;
   var damageFlashUntil = 0;
   var gameOver = false;
   var gameOverAt = 0;
   var paired = false;
   var calibrated = false; // the phone has finished its first calibration -- enemies only start spawning after this
+
+  // Pausing (Esc) needs to freeze every timestamp-driven timer (spawn cadence,
+  // enemy fire-back deadline, flash effects) without them jumping forward the
+  // instant play resumes. Rather than manually shifting every stored deadline,
+  // all game logic reads time through this virtual clock instead of raw
+  // performance.now() directly — it simply stops advancing while paused.
+  var paused = false;
+  var pauseStartedAt = 0;
+  var totalPausedMs = 0;
+
+  function gameNow() {
+    if (paused) return pauseStartedAt - totalPausedMs;
+    return performance.now() - totalPausedMs;
+  }
 
   // Background image — whatever's sitting in public/display/assets/ (any
   // name, doesn't have to be exactly "playground.jpg"). Falls back to a
@@ -140,6 +159,36 @@
     nextSpawnAt = now + 1000;
   }
 
+  function pauseGame() {
+    if (!paired || !calibrated || gameOver || paused) return;
+    paused = true;
+    pauseStartedAt = performance.now();
+    pauseOverlayEl.classList.remove('hidden');
+  }
+
+  function resumeGame() {
+    if (!paused) return;
+    totalPausedMs += performance.now() - pauseStartedAt;
+    paused = false;
+    pauseOverlayEl.classList.add('hidden');
+  }
+
+  function restartGame() {
+    pauseOverlayEl.classList.add('hidden');
+    paused = false;
+    startNewGame(gameNow());
+  }
+
+  function quitToLobby() {
+    pauseOverlayEl.classList.add('hidden');
+    paused = false;
+    // The existing 'close' handler already shows the pairing screen and
+    // reconnects (same session code) after a short delay — the same path
+    // used for any real disconnect — which also relays a peer_disconnected
+    // to the phone, sending it back to its own join screen.
+    if (ws) { try { ws.close(); } catch (e) {} }
+  }
+
   function spawnEnemy(now) {
     var idx;
     do {
@@ -163,7 +212,7 @@
     if (!target) return 0;
     if (target.state === 'popping-up') return Math.min(1, (now - target.stateStartedAt) / POP_UP_MS);
     if (target.state === 'popping-down') return Math.max(0, 1 - (now - target.stateStartedAt) / POP_DOWN_MS);
-    return 1;
+    return 1; // includes the 'hit' hold state — stays full size so the hit sprite reads clearly
   }
 
   function updateGame(now) {
@@ -199,17 +248,20 @@
         gameOver = true;
         gameOverAt = now;
       }
+    } else if (target.state === 'hit' && now - target.stateStartedAt >= HIT_HOLD_MS) {
+      target.state = 'popping-down';
+      target.stateStartedAt = now;
     } else if (target.state === 'popping-down' && now - target.stateStartedAt >= POP_DOWN_MS) {
       target = null;
     }
   }
 
   function handleFire(msg) {
-    if (!calibrated || gameOver) return;
+    if (!calibrated || gameOver || paused) return;
     shots++;
     var px = msg.x * W;
     var py = msg.y * H;
-    var now = performance.now();
+    var now = gameNow();
     if (target && target.state === 'visible' && !target.resolved) {
       var dx = px - target.x;
       var dy = py - target.y;
@@ -217,9 +269,10 @@
       if (dist <= target.r + HIT_FORGIVENESS) {
         score++;
         target.resolved = true;
-        hitFlashUntil = now + HIT_FLASH_MS;
-        target.state = 'popping-down';
+        hitFlashUntil = now + HIT_HOLD_MS;
+        target.state = 'hit';
         target.stateStartedAt = now;
+        hitBurstFlashes.push({ x: target.x, y: target.y, expire: now + HIT_BURST_MS });
         return;
       }
     }
@@ -244,7 +297,7 @@
         showGame();
       } else if (msg.type === PROTOCOL.MSG_CALIBRATED) {
         calibrated = true;
-        startNewGame(performance.now());
+        startNewGame(gameNow());
       } else if (msg.type === PROTOCOL.MSG_PEER_DISCONNECTED) {
         calibrated = false;
         showPairing();
@@ -405,6 +458,21 @@
     });
   }
 
+  function drawHitBurstFlashes(now) {
+    hitBurstFlashes = hitBurstFlashes.filter(function (f) { return f.expire > now; });
+    hitBurstFlashes.forEach(function (f) {
+      var t = (f.expire - now) / HIT_BURST_MS; // 1 -> 0 over the effect's life
+      var radius = 70 * (1 - t) + 20;
+      ctx.beginPath();
+      ctx.arc(f.x, f.y, radius, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255, 255, 255, ' + (0.5 * t) + ')';
+      ctx.fill();
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = 'rgba(255, 240, 160, ' + t + ')';
+      ctx.stroke();
+    });
+  }
+
   function drawMuzzleFlashes(now) {
     muzzleFlashes = muzzleFlashes.filter(function (m) { return m.expire > now; });
     muzzleFlashes.forEach(function (m) {
@@ -504,13 +572,14 @@
   }
 
   function render() {
-    var now = performance.now();
+    var now = gameNow();
 
-    if (paired) updateGame(now);
+    if (paired && !paused) updateGame(now);
 
     ctx.clearRect(0, 0, W, H);
     drawBackground();
     drawTarget(now);
+    drawHitBurstFlashes(now);
     drawMuzzleFlashes(now);
     drawMissFlashes(now);
     drawCrosshair();
@@ -520,6 +589,14 @@
     drawGameOver();
     requestAnimationFrame(render);
   }
+
+  window.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape') return;
+    if (paused) resumeGame();
+    else pauseGame();
+  });
+  pauseRestartBtn.addEventListener('click', restartGame);
+  pauseQuitBtn.addEventListener('click', quitToLobby);
 
   function init() {
     sessionCodeEl.textContent = sessionCode;

@@ -118,13 +118,20 @@ package.json
   `display.js`), rendered either as a sprite from `GET /api/enemy-sprites`
   (randomly picked per spawn, if any are present) or a built-in drawn face.
   Each enemy has a fixed window (`ENEMY_LIFETIME_MS`, 3s) to be shot: a `fire`
-  message landing within its hit radius while it's up kills it (+1 score); if
-  that window expires first, it fires back instead — the player loses a life
-  (with a muzzle-flash effect at the enemy and a red screen flash), and the
-  enemy ducks down either way. Losing all
-  starting lives (`STARTING_LIVES`, 3) shows a **GAME OVER** overlay with the
-  final score, then auto-restarts after a few seconds. Also renders a live
-  crosshair from `aim` messages.
+  message landing within its hit radius while it's up kills it (+1 score),
+  showing a bright impact burst plus the sprite's `-hit` pose (or a white
+  tint if there isn't one) held for `HIT_HOLD_MS` (450ms) before it ducks
+  down, so the hit actually reads clearly instead of flashing for a single
+  frame; if that window expires first, it fires back instead — the player
+  loses a life (with a muzzle-flash effect at the enemy and a red screen
+  flash), and the enemy ducks down either way. Losing all starting lives
+  (`STARTING_LIVES`, 3) shows a **GAME OVER** overlay with the final score,
+  then auto-restarts after a few seconds. Also renders a live crosshair from
+  `aim` messages. Pressing **Esc** at any time during play pauses the game
+  (freezing every timer so nothing resolves the instant you resume) and
+  shows **Restart** (resets score/lives, keeps calibration) and **Quit to
+  Lobby** (disconnects the phone back to its join screen and returns the
+  display to the pairing screen).
 - **Phone client**: on pairing, requests motion sensor access
   (`DeviceOrientationEvent.requestPermission()` on iOS 13+; no prompt needed on
   most Android browsers). Raw `alpha`/`beta`/`gamma` readings are smoothed with an
@@ -143,7 +150,12 @@ package.json
   doesn't silently get swallowed by a one-frame reading blip. Since axis-sign
   conventions can vary by device/browser, **Invert Pan**/**Invert Tilt** toggles
   on the calibrate screen (persisted per-device) let the player fix a backwards
-  axis themselves without a code change.
+  axis themselves without a code change. Each tap also fires the phone's own
+  camera flash as a physical "muzzle flash," if the browser exposes torch
+  control on a camera track — Android Chrome/Edge generally do; **iOS Safari
+  never has** (an Apple/WebKit platform restriction, not a bug here), so on
+  iPhone the game just plays without it, silently, with no extra permission
+  prompt for a feature that could never work there anyway.
 
 ## Deploying it publicly
 

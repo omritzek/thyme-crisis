@@ -87,6 +87,30 @@
     max-width: 420px;
     font-family: -apple-system, Helvetica, Arial, sans-serif;
   }
+  #pauseOverlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.6);
+  }
+  #pausePanel {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 18px;
+    padding: 36px 48px;
+    border-radius: 4px;
+  }
+  #pauseTitle {
+    font-size: 40px;
+    margin: 0;
+  }
+  #pauseButtons {
+    display: flex;
+    gap: 16px;
+  }
   .hidden { display: none !important; }
 </style>
 </head>
@@ -104,6 +128,15 @@
   </div>
   <div id="stage" class="hidden">
     <canvas id="game" width="1280" height="720"></canvas>
+    <div id="pauseOverlay" class="hidden">
+      <div id="pausePanel" class="tc-panel">
+        <h2 id="pauseTitle" class="tc-title">Paused</h2>
+        <div id="pauseButtons">
+          <button id="pauseRestartBtn" class="tc-btn tc-btn-accent">Restart</button>
+          <button id="pauseQuitBtn" class="tc-btn">Quit to Lobby</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script src="/shared/protocol.js"></script>
