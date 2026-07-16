@@ -73,16 +73,24 @@
 
   // Optional enemy sprite images — if the server finds any in
   // public/display/assets/enemies/, use those instead of the built-in
-  // drawn face, picking a random one for each spawn. Falls back cleanly
+  // drawn face, picking a random pair for each spawn. Each entry is
+  // { img, hitImg }: hitImg is the "<name>-hit.<ext>" companion file if one
+  // was found (shown during the hit flash instead of the white-tint
+  // effect), or null if there isn't one for that sprite. Falls back cleanly
   // (drawTarget uses the drawn face) if the list is empty or fails to load.
   var enemySprites = [];
   fetch('/api/enemy-sprites')
     .then(function (r) { return r.json(); })
     .then(function (data) {
-      (data.sprites || []).forEach(function (src) {
+      (data.sprites || []).forEach(function (entry) {
         var img = new Image();
-        img.onload = function () { enemySprites.push(img); };
-        img.src = src;
+        var hitImg = null;
+        if (entry.hit) {
+          hitImg = new Image();
+          hitImg.src = entry.hit;
+        }
+        img.onload = function () { enemySprites.push({ img: img, hitImg: hitImg }); };
+        img.src = entry.base;
       });
     })
     .catch(function () { /* sprites are optional; built-in face still works */ });
@@ -243,19 +251,26 @@
   var spriteFlashCanvas = document.createElement('canvas');
   var spriteFlashCtx = spriteFlashCanvas.getContext('2d');
 
-  function drawSpriteEnemy(sprite, r, flashing) {
+  function drawSpriteEnemy(spriteEntry, r, flashing) {
     var size = r * 2.6; // roughly matches the built-in face's visual extent
+
+    if (flashing && spriteEntry.hitImg && spriteEntry.hitImg.naturalWidth > 0) {
+      // A dedicated hit-reaction pose was provided — just show it, no tint needed.
+      ctx.drawImage(spriteEntry.hitImg, -size / 2, -size / 2, size, size);
+      return;
+    }
+
     if (flashing) {
       spriteFlashCanvas.width = size;
       spriteFlashCanvas.height = size;
-      spriteFlashCtx.drawImage(sprite, 0, 0, size, size);
+      spriteFlashCtx.drawImage(spriteEntry.img, 0, 0, size, size);
       spriteFlashCtx.globalCompositeOperation = 'source-atop';
       spriteFlashCtx.fillStyle = '#ffffff';
       spriteFlashCtx.fillRect(0, 0, size, size);
       spriteFlashCtx.globalCompositeOperation = 'source-over';
       ctx.drawImage(spriteFlashCanvas, -size / 2, -size / 2, size, size);
     } else {
-      ctx.drawImage(sprite, -size / 2, -size / 2, size, size);
+      ctx.drawImage(spriteEntry.img, -size / 2, -size / 2, size, size);
     }
   }
 
@@ -346,7 +361,7 @@
     ctx.translate(target.x, target.y);
     ctx.scale(dir * scale, scale); // mirror to face center, and grow/shrink for the pop-up/down animation
 
-    if (target.sprite && target.sprite.naturalWidth > 0) {
+    if (target.sprite && target.sprite.img.naturalWidth > 0) {
       drawSpriteEnemy(target.sprite, r, flashing);
     } else {
       drawBuiltInFace(r, flashing);

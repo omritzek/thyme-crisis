@@ -21,6 +21,22 @@ picked each time a new enemy spawns.
 - **Filenames:** anything, as long as the extension is `.png`, `.jpg`,
   `.jpeg`, or `.webp` — e.g. `enemy1.png`, `soldier.png`, `guy-with-hat.png`.
 
+## Optional: a dedicated "hit" pose
+
+Name a file `<name>-hit.<ext>` and it's automatically paired with `<name>.<ext>`
+as its hit-reaction sprite — shown for a brief moment when that enemy gets shot,
+instead of the default white-flash tint effect. It isn't spawnable on its own.
+
+```
+public/display/assets/enemies/
+  soldier.png       <- normal pose (spawnable)
+  soldier-hit.png    <- shown briefly when soldier.png gets shot
+  guard.png          <- normal pose, no hit variant -> falls back to white-flash tint
+```
+
+A `-hit` file with no matching base file (e.g. `mystery-hit.png` with no
+`mystery.png`) is just ignored.
+
 ## Example
 
 ```

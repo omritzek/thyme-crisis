@@ -73,6 +73,11 @@ app.get('/api/qrcode', async (req, res) => {
 // file into public/display/assets/enemies/ is enough to use it — no code
 // change needed. Returns an empty list (not an error) if the folder is
 // missing or empty; the display falls back to its built-in drawn sprite.
+//
+// A file named "<name>-hit.<ext>" is treated as the hit-reaction pose for
+// the base sprite "<name>.<ext>" and paired with it rather than listed as
+// its own independent spawnable sprite. A "-hit" file with no matching base
+// file is just ignored.
 const ASSETS_DIR = path.join(__dirname, '../public/display/assets');
 const ENEMY_SPRITE_DIR = path.join(ASSETS_DIR, 'enemies');
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp']);
@@ -80,11 +85,22 @@ const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp']);
 app.get('/api/enemy-sprites', async (req, res) => {
   try {
     const entries = await fs.readdir(ENEMY_SPRITE_DIR);
-    const files = entries
-      .filter((name) => IMAGE_EXTENSIONS.has(path.extname(name).toLowerCase()))
+    const imageFiles = entries.filter((name) => IMAGE_EXTENSIONS.has(path.extname(name).toLowerCase()));
+    const byName = new Set(imageFiles);
+
+    const sprites = imageFiles
+      .filter((name) => !/-hit\.[^.]+$/i.test(name))
       .sort()
-      .map((name) => `/display/assets/enemies/${name}`);
-    res.json({ sprites: files });
+      .map((name) => {
+        const ext = path.extname(name);
+        const hitName = name.slice(0, -ext.length) + '-hit' + ext;
+        return {
+          base: `/display/assets/enemies/${name}`,
+          hit: byName.has(hitName) ? `/display/assets/enemies/${hitName}` : null
+        };
+      });
+
+    res.json({ sprites });
   } catch (err) {
     res.json({ sprites: [] });
   }
