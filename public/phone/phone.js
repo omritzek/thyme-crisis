@@ -4,9 +4,10 @@
   var SAMPLE_W = 160;
   var SAMPLE_H = 90;
   var FRAME_INTERVAL_MS = 50; // ~20fps
-  var MIN_MARKER_PIXELS = 4;
+  var MIN_MARKER_PIXELS = 6;
+  var MIN_FILL_RATIO = 0.45; // matched pixels / bounding-box area — rejects scattered noise
   var HUE_TOLERANCE_DEG = 25;
-  var MIN_SATURATION = 0.4;
+  var MIN_SATURATION = 0.45;
   var MIN_VALUE = 0.35;
 
   var MARKER_COLOR_HUE = { tl: 0, tr: 120, bl: 240, br: 60 }; // red, green, blue, yellow
@@ -26,6 +27,10 @@
   var overlayCtx = overlay.getContext('2d');
   var fireCatcher = document.getElementById('fireCatcher');
   var startBtn = document.getElementById('startBtn');
+  var markerDots = {};
+  document.querySelectorAll('.markerDot').forEach(function (el) {
+    markerDots[el.dataset.id] = el;
+  });
 
   var sampleCanvas = document.createElement('canvas');
   sampleCanvas.width = SAMPLE_W;
@@ -175,7 +180,7 @@
 
     var sums = {};
     Object.keys(MARKER_COLOR_HUE).forEach(function (id) {
-      sums[id] = { sx: 0, sy: 0, count: 0 };
+      sums[id] = { sx: 0, sy: 0, count: 0, minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
     });
 
     for (var py = 0; py < SAMPLE_H; py++) {
@@ -187,21 +192,35 @@
 
         for (var id in MARKER_COLOR_HUE) {
           if (hueDist(hsv[0], MARKER_COLOR_HUE[id]) <= HUE_TOLERANCE_DEG) {
-            sums[id].sx += px;
-            sums[id].sy += py;
-            sums[id].count++;
+            var s = sums[id];
+            s.sx += px;
+            s.sy += py;
+            s.count++;
+            if (px < s.minX) s.minX = px;
+            if (px > s.maxX) s.maxX = px;
+            if (py < s.minY) s.minY = py;
+            if (py > s.maxY) s.maxY = py;
             break;
           }
         }
       }
     }
 
+    // A real marker is a small solid-color square, so its matched pixels
+    // should densely fill their own bounding box. A handful of pixels
+    // scattered across a wide area (video noise, anti-aliased text edges
+    // that happen to pick up a color tinge) is rejected here even though
+    // it might clear the raw pixel-count bar — this is what stops a stray
+    // false positive from being treated as a genuine marker detection.
     var centroids = {};
     Object.keys(sums).forEach(function (id) {
       var s = sums[id];
-      if (s.count >= MIN_MARKER_PIXELS) {
-        centroids[id] = { x: s.sx / s.count, y: s.sy / s.count };
-      }
+      if (s.count < MIN_MARKER_PIXELS) return;
+      var boxW = s.maxX - s.minX + 1;
+      var boxH = s.maxY - s.minY + 1;
+      var fillRatio = s.count / (boxW * boxH);
+      if (fillRatio < MIN_FILL_RATIO) return;
+      centroids[id] = { x: s.sx / s.count, y: s.sy / s.count };
     });
     return centroids;
   }
@@ -276,6 +295,9 @@
     if (appState === 'calibrating') {
       startBtn.textContent = 'Detecting markers… (' + detectedCount + '/4)';
       startBtn.disabled = detectedCount < 4;
+      Object.keys(markerDots).forEach(function (id) {
+        markerDots[id].classList.toggle('found', !!centroids[id]);
+      });
     }
 
     if (detectedCount < 4) {
