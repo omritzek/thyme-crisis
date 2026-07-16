@@ -47,6 +47,9 @@
   var trackingOk = false;
   var trackingQuality = 'full'; // 'full' (4 markers) | 'partial' (3) | 'low' (2)
   var lastAim = null; // {x, y} normalized 0-1
+  var lastGoodTrackingAt = 0;
+  var FIRE_GRACE_MS = 400; // tapping the screen jostles the camera right when firing — don't let a one-frame tracking blip silently eat the shot
+  var blockedFireFlashUntil = 0;
   var detectIntervalId = null;
 
   function showScreen(name) {
@@ -401,6 +404,7 @@
     lastAim = aim;
     trackingOk = true;
     trackingQuality = detectedCount >= 4 ? 'full' : (detectedCount === 3 ? 'partial' : 'low');
+    lastGoodTrackingAt = performance.now();
 
     if (appState === 'playing' && ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: PROTOCOL.MSG_AIM, x: aim.x, y: aim.y }));
@@ -476,6 +480,13 @@
       overlayCtx.fillText('reduced accuracy — only ' + detectedCount + '/4 markers visible', cx, cy + 60);
     }
 
+    if (performance.now() < blockedFireFlashUntil) {
+      overlayCtx.font = 'bold 20px -apple-system, Helvetica, Arial, sans-serif';
+      overlayCtx.textAlign = 'center';
+      overlayCtx.fillStyle = '#ff4d4d';
+      overlayCtx.fillText('shot blocked — no tracking', cx, cy - 40);
+    }
+
     if (appState === 'calibrating' || appState === 'playing') {
       requestAnimationFrame(drawOverlay);
     }
@@ -496,7 +507,11 @@
 
   fireCatcher.addEventListener('pointerdown', function () {
     if (appState !== 'playing') return;
-    if (!trackingOk || !lastAim) return;
+    var withinGracePeriod = performance.now() - lastGoodTrackingAt <= FIRE_GRACE_MS;
+    if (!lastAim || !withinGracePeriod) {
+      blockedFireFlashUntil = performance.now() + 200;
+      return;
+    }
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: PROTOCOL.MSG_FIRE, x: lastAim.x, y: lastAim.y }));
     }
