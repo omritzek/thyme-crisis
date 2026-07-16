@@ -1,4 +1,4 @@
-# Phone Light Gun Game (MVP)
+# Thyme Crisis Game(MVP)
 
 A two-screen, single-player shooting game. A computer displays the game (a single
 slow-moving target). A phone acts as the gun: hold it up like a remote and pan/tilt
