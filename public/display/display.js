@@ -65,12 +65,14 @@
   var bgImage = new Image();
   var bgReady = false;
   bgImage.onload = function () { bgReady = true; };
+  bgImage.onerror = function () { console.error('[background] image failed to load:', bgImage.src); };
   fetch('/api/background-image')
     .then(function (r) { return r.json(); })
     .then(function (data) {
+      console.log('[background] /api/background-image ->', data);
       if (data.url) bgImage.src = data.url;
     })
-    .catch(function () { /* background is optional; plain dark fallback still works */ });
+    .catch(function (err) { console.error('[background] fetch failed:', err); });
 
   // Optional enemy sprite images — if the server finds any in
   // public/display/assets/enemies/, use those instead of the built-in
@@ -83,18 +85,24 @@
   fetch('/api/enemy-sprites')
     .then(function (r) { return r.json(); })
     .then(function (data) {
+      console.log('[sprites] /api/enemy-sprites ->', data);
       (data.sprites || []).forEach(function (entry) {
         var img = new Image();
         var hitImg = null;
         if (entry.hit) {
           hitImg = new Image();
+          hitImg.onerror = function () { console.error('[sprites] hit image failed to load:', entry.hit); };
           hitImg.src = entry.hit;
         }
-        img.onload = function () { enemySprites.push({ img: img, hitImg: hitImg }); };
+        img.onload = function () {
+          enemySprites.push({ img: img, hitImg: hitImg });
+          console.log('[sprites] loaded, pool size now', enemySprites.length, '-', entry.base);
+        };
+        img.onerror = function () { console.error('[sprites] base image failed to load:', entry.base); };
         img.src = entry.base;
       });
     })
-    .catch(function () { /* sprites are optional; built-in face still works */ });
+    .catch(function (err) { console.error('[sprites] fetch failed:', err); });
 
   function generateSessionCode() {
     var code = '';
