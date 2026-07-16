@@ -1,6 +1,7 @@
 const path = require('path');
 const os = require('os');
 const fs = require('fs/promises');
+const http = require('http');
 const https = require('https');
 const express = require('express');
 const QRCode = require('qrcode');
@@ -10,7 +11,15 @@ const { WebSocketServer } = require('ws');
 const PORT = process.env.PORT || 3000;
 const SESSION_RE = /^[A-Z0-9]{4}$/;
 
+// When hosted on a real platform (Render, Railway, Fly, etc.), that platform's
+// edge terminates real, browser-trusted TLS and proxies plain HTTP/WS to this
+// process — generating our own self-signed cert would be redundant and, since
+// nothing forwards the raw TLS port to us there, wouldn't even be reachable.
+// The self-signed cert is only needed for the "run it on your own LAN" path.
+const BEHIND_TLS_PROXY = process.env.RENDER === 'true' || process.env.NODE_ENV === 'production';
+
 const app = express();
+app.set('trust proxy', 1);
 
 // The phone needs camera access (getUserMedia), which mobile browsers only
 // allow on a secure context (HTTPS or localhost) — a plain http:// LAN
@@ -251,11 +260,22 @@ function attachWebSocketServer(server) {
 }
 
 async function main() {
-  const { key, cert } = await generateCert();
-  const server = https.createServer({ key, cert }, app);
+  let server;
+  if (BEHIND_TLS_PROXY) {
+    server = http.createServer(app);
+  } else {
+    const { key, cert } = await generateCert();
+    server = https.createServer({ key, cert }, app);
+  }
   attachWebSocketServer(server);
 
   server.listen(PORT, () => {
+    if (BEHIND_TLS_PROXY) {
+      console.log(`Phone light gun relay server listening on http://0.0.0.0:${PORT}`);
+      console.log('Running behind a TLS-terminating proxy (BEHIND_TLS_PROXY) — the');
+      console.log('platform hosting this handles the real HTTPS certificate.');
+      return;
+    }
     console.log(`Phone light gun relay server listening on https://0.0.0.0:${PORT}`);
     console.log('Using a self-signed certificate — every device will need to accept a');
     console.log('one-time browser security warning the first time it loads the page.');

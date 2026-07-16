@@ -145,6 +145,34 @@ package.json
   on the calibrate screen (persisted per-device) let the player fix a backwards
   axis themselves without a code change.
 
+## Deploying it publicly
+
+Running on your own LAN is fine for playing at home, but a **self-signed
+certificate only works if you personally click through the "not secure"
+browser warning** — a random visitor won't (and iOS Safari may refuse
+motion-sensor access on an untrusted origin outright). To make this playable
+by anyone from a real URL, host it on a platform that terminates real,
+browser-trusted TLS for you instead of generating one yourself:
+
+1. Push this repo to GitHub (already done if you're reading this from there).
+2. Create a [Render](https://render.com) account, then **New → Blueprint** and
+   point it at this repo — it picks up `render.yaml` automatically (free web
+   service, `npm install` / `npm start`, `NODE_ENV=production`). Any other
+   Node-friendly host that proxies WebSockets works too (Railway, Fly.io);
+   just make sure `NODE_ENV=production` is set so the server knows a proxy
+   is handling TLS.
+3. Once it's deployed, visit the `https://your-app.onrender.com/` URL it
+   gives you — that's a real certificate, so there's no warning to click
+   through, on the display or the phone.
+
+Setting `NODE_ENV=production` (or deploying on Render specifically, which
+sets `RENDER=true` automatically) switches the server to listen on plain
+HTTP and skip self-signed cert generation entirely, since the hosting
+platform's edge is what actually terminates TLS in that setup — see
+`BEHIND_TLS_PROXY` in `server/index.js`. Locally (`npm start` with neither
+of those set), it behaves exactly as described above: self-signed HTTPS,
+LAN IPs, the works.
+
 ## Known limitations (by design, see PRD)
 
 - No moving-target-avoidance, multiplayer, or persistence — this is an MVP
