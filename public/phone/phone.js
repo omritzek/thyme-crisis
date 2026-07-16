@@ -4,6 +4,7 @@
   var SAMPLE_W = 160;
   var SAMPLE_H = 90;
   var FRAME_INTERVAL_MS = 50; // ~20fps
+  var MIN_TRACKING_MARKERS = 2; // fewer than this and there's no usable transform at all
   var MIN_MARKER_PIXELS = 6;
   var MIN_FILL_RATIO = 0.45; // matched pixels / bounding-box area — rejects scattered noise
   var HUE_TOLERANCE_DEG = 25;
@@ -44,6 +45,7 @@
   var detectedMarkers = {}; // id -> {x,y} in sample-canvas space, this frame only
   var detectedCount = 0;
   var trackingOk = false;
+  var trackingQuality = 'full'; // 'full' (4 markers) | 'partial' (3) | 'low' (2)
   var lastAim = null; // {x, y} normalized 0-1
   var detectIntervalId = null;
 
@@ -283,6 +285,77 @@
     };
   }
 
+  // --- Lower-DOF fallbacks for when not all four markers are visible ---
+  // These trade accuracy for coverage: a full homography needs all four
+  // corners in frame, which often isn't true at close range. With 3 points
+  // we fit a 6-DOF affine transform (no perspective correction); with 2 we
+  // fit a 4-DOF similarity transform (uniform scale + rotation + translation,
+  // no perspective or shear). Both are exact fits for their point count, and
+  // markedly less accurate than the full homography, especially the 2-point
+  // case — but "less accurate" beats "can't aim at all".
+
+  function computeAffine(srcPts, dstPts) {
+    var A = [];
+    var b = [];
+    for (var i = 0; i < 3; i++) {
+      var x = srcPts[i].x, y = srcPts[i].y;
+      A.push([x, y, 1, 0, 0, 0]);
+      b.push(dstPts[i].x);
+      A.push([0, 0, 0, x, y, 1]);
+      b.push(dstPts[i].y);
+    }
+    var m = solveLinearSystem(A, b);
+    if (!m) return null;
+    return { a: m[0], b: m[1], c: m[2], d: m[3], e: m[4], f: m[5] };
+  }
+
+  function applyAffine(T, x, y) {
+    return { x: T.a * x + T.b * y + T.c, y: T.d * x + T.e * y + T.f };
+  }
+
+  function computeSimilarity(srcPts, dstPts) {
+    var A = [];
+    var b = [];
+    for (var i = 0; i < 2; i++) {
+      var x = srcPts[i].x, y = srcPts[i].y;
+      A.push([x, -y, 1, 0]);
+      b.push(dstPts[i].x);
+      A.push([y, x, 0, 1]);
+      b.push(dstPts[i].y);
+    }
+    var m = solveLinearSystem(A, b);
+    if (!m) return null;
+    return { a: m[0], b: m[1], tx: m[2], ty: m[3] };
+  }
+
+  function applySimilarity(T, x, y) {
+    return { x: T.a * x - T.b * y + T.tx, y: T.b * x + T.a * y + T.ty };
+  }
+
+  // Picks the best transform the currently-visible markers allow: full
+  // homography (4 pts) > affine (3 pts) > similarity (2 pts). Returns a
+  // function that maps a sample-space point to display-space, or null if
+  // fewer than 2 markers are visible or the fit is degenerate.
+  function computeAimMapper(centroids, layoutById) {
+    var visibleIds = ['tl', 'tr', 'bl', 'br'].filter(function (id) { return !!centroids[id]; });
+    if (visibleIds.length < MIN_TRACKING_MARKERS) return null;
+
+    var ids = visibleIds.length >= 4 ? visibleIds.slice(0, 4) : visibleIds;
+    var srcPts = ids.map(function (id) { return centroids[id]; });
+    var dstPts = ids.map(function (id) { return { x: layoutById[id].xPx, y: layoutById[id].yPx }; });
+
+    if (ids.length >= 4) {
+      var H = computeHomography(srcPts, dstPts);
+      return H && function (x, y) { return applyHomography(H, x, y); };
+    }
+    if (ids.length === 3) {
+      var Aff = computeAffine(srcPts, dstPts);
+      return Aff && function (x, y) { return applyAffine(Aff, x, y); };
+    }
+    var Sim = computeSimilarity(srcPts, dstPts);
+    return Sim && function (x, y) { return applySimilarity(Sim, x, y); };
+  }
+
   // --- Per-frame processing ---
 
   function processFrame() {
@@ -293,34 +366,29 @@
     detectedCount = ids.length;
 
     if (appState === 'calibrating') {
-      startBtn.textContent = 'Detecting markers… (' + detectedCount + '/4)';
-      startBtn.disabled = detectedCount < 4;
+      if (detectedCount >= MIN_TRACKING_MARKERS) {
+        startBtn.textContent = detectedCount >= 4
+          ? 'Start (4/4 — best accuracy)'
+          : 'Start (' + detectedCount + '/4 — reduced accuracy)';
+      } else {
+        startBtn.textContent = 'Detecting markers… (' + detectedCount + '/4)';
+      }
+      startBtn.disabled = detectedCount < MIN_TRACKING_MARKERS;
       Object.keys(markerDots).forEach(function (id) {
         markerDots[id].classList.toggle('found', !!centroids[id]);
       });
     }
 
-    if (detectedCount < 4) {
-      trackingOk = false;
-      return;
-    }
-
     var layoutById = {};
     markerLayout.markers.forEach(function (m) { layoutById[m.id] = m; });
 
-    var srcPts = [], dstPts = [];
-    ['tl', 'tr', 'bl', 'br'].forEach(function (id) {
-      srcPts.push(centroids[id]);
-      dstPts.push({ x: layoutById[id].xPx, y: layoutById[id].yPx });
-    });
-
-    var H = computeHomography(srcPts, dstPts);
-    if (!H) {
+    var mapper = computeAimMapper(centroids, layoutById);
+    if (!mapper) {
       trackingOk = false;
       return;
     }
 
-    var center = applyHomography(H, SAMPLE_W / 2, SAMPLE_H / 2);
+    var center = mapper(SAMPLE_W / 2, SAMPLE_H / 2);
     if (!center) {
       trackingOk = false;
       return;
@@ -332,6 +400,7 @@
     };
     lastAim = aim;
     trackingOk = true;
+    trackingQuality = detectedCount >= 4 ? 'full' : (detectedCount === 3 ? 'partial' : 'low');
 
     if (appState === 'playing' && ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: PROTOCOL.MSG_AIM, x: aim.x, y: aim.y }));
@@ -384,7 +453,8 @@
 
     var cx = w / 2, cy = h / 2;
     var lost = appState === 'playing' && !trackingOk;
-    overlayCtx.strokeStyle = lost ? '#ff4d4d' : '#00ffe1';
+    var crosshairColor = lost ? '#ff4d4d' : (trackingQuality === 'full' ? '#00ffe1' : '#ffd24d');
+    overlayCtx.strokeStyle = crosshairColor;
     overlayCtx.lineWidth = 2;
     overlayCtx.beginPath();
     overlayCtx.arc(cx, cy, 22, 0, Math.PI * 2);
@@ -399,6 +469,11 @@
       overlayCtx.textAlign = 'center';
       overlayCtx.fillStyle = '#ff4d4d';
       overlayCtx.fillText('tracking lost — recenter phone on screen', cx, cy + 60);
+    } else if (appState === 'playing' && trackingQuality !== 'full') {
+      overlayCtx.font = '16px -apple-system, Helvetica, Arial, sans-serif';
+      overlayCtx.textAlign = 'center';
+      overlayCtx.fillStyle = '#ffd24d';
+      overlayCtx.fillText('reduced accuracy — only ' + detectedCount + '/4 markers visible', cx, cy + 60);
     }
 
     if (appState === 'calibrating' || appState === 'playing') {
