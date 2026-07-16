@@ -175,15 +175,20 @@ package.json
   conventions can vary by device/browser, **Invert Pan**/**Invert Tilt** toggles
   on the calibrate screen (persisted per-device) let the player fix a backwards
   axis themselves without a code change. Each tap also fires the phone's own
-  camera flash as a physical "muzzle flash," if the browser exposes torch
-  control on a camera track — Android Chrome/Edge generally do; **iOS Safari
-  never has** (an Apple/WebKit platform restriction, not a bug here), so on
-  iPhone the game just plays without it, silently, with no extra permission
-  prompt for a feature that could never work there anyway. The gun holds 6
-  shots (`AMMO_MAX`); once empty, taps do nothing but flash a "reload" hint
-  until the player tilts the phone down (50°+ below the calibrated baseline,
-  held briefly) to reload back to a full 6 — same aim math already used for
-  aiming, just checking the tilt delta against a different threshold.
+  camera flash as a physical "muzzle flash" and a short vibration, if the
+  browser exposes torch control on a camera track / the Vibration API —
+  Android Chrome/Edge generally do; **iOS Safari never has** (an
+  Apple/WebKit platform restriction, not a bug here), so on iPhone the game
+  just plays without either, silently, with no extra permission prompt for
+  features that could never work there anyway. The gun holds 6 shots
+  (`AMMO_MAX`); once empty, taps do nothing but flash a "reload" hint until
+  the player tilts the phone down and holds it there briefly, triggering a
+  longer rolling vibration once it completes and resetting to a full 6.
+  Getting a phone held exactly straight down is hard in practice, so the
+  tilt check uses two thresholds rather than one: `RELOAD_TILT_TRIGGER_DEG`
+  (30° below baseline) starts the hold, but once started only rising back
+  above the looser `RELOAD_TILT_CANCEL_DEG` (15°) cancels it — ordinary hand
+  wobble mid-hold doesn't reset your progress.
 
 ## Deploying it publicly
 

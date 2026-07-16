@@ -9,10 +9,16 @@
   // Six shots, then the player has to physically reload by tilting the
   // phone down (like lowering the muzzle) and holding it there briefly —
   // measured relative to the calibrated baseline so it works regardless of
-  // how the phone happens to be held or where the screen sits.
+  // how the phone happens to be held or where the screen sits. Two separate
+  // thresholds (rather than one) give it some hysteresis: once you've tilted
+  // far enough to start the hold, a little hand wobble back upward doesn't
+  // immediately cancel it -- only rising above the looser cancel threshold
+  // does. Getting the phone pointed exactly straight down is hard to hold
+  // steady in practice, so both thresholds are deliberately generous.
   var AMMO_MAX = 6;
-  var RELOAD_TILT_DELTA_DEG = -50; // this far below the calibrated baseline counts as "pointed down"
-  var RELOAD_HOLD_MS = 400;
+  var RELOAD_TILT_TRIGGER_DEG = -30; // tilt this far below baseline to start the reload hold
+  var RELOAD_TILT_CANCEL_DEG = -15; // only cancel an in-progress hold if it rises back above this
+  var RELOAD_HOLD_MS = 350;
   var ammo = AMMO_MAX;
   var reloadHoldStartedAt = null;
 
@@ -182,6 +188,17 @@
       beta: latestOrientation.beta + (event.beta - latestOrientation.beta) * ORIENTATION_SMOOTHING,
       gamma: latestOrientation.gamma + (event.gamma - latestOrientation.gamma) * ORIENTATION_SMOOTHING
     };
+  }
+
+  // --- Haptic feedback ---
+  // A short sharp buzz on every shot and a longer, gentler rolling buzz on a
+  // completed reload. Same iOS caveat as the torch: Safari/WebKit has never
+  // implemented the Vibration API on a phone, so this is silently a no-op
+  // there rather than something to request permission for.
+  var FIRE_VIBRATE_MS = 15;
+
+  function vibrate(pattern) {
+    if (navigator.vibrate) navigator.vibrate(pattern);
   }
 
   // --- Camera torch flash on fire ---
@@ -364,12 +381,14 @@
     var deltaTilt = ae.elevation - baseline.elevation;
 
     if (ammo <= 0) {
-      if (deltaTilt <= RELOAD_TILT_DELTA_DEG) {
+      var cancelThreshold = reloadHoldStartedAt === null ? RELOAD_TILT_TRIGGER_DEG : RELOAD_TILT_CANCEL_DEG;
+      if (deltaTilt <= cancelThreshold) {
         if (reloadHoldStartedAt === null) reloadHoldStartedAt = performance.now();
         else if (performance.now() - reloadHoldStartedAt >= RELOAD_HOLD_MS) {
           ammo = AMMO_MAX;
           reloadHoldStartedAt = null;
           updateAmmoUi();
+          vibrate([25, 40, 25, 40, 50]);
         }
       } else {
         reloadHoldStartedAt = null;
@@ -446,6 +465,7 @@
     ammo--;
     updateAmmoUi();
     flashTorch();
+    vibrate(FIRE_VIBRATE_MS);
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: PROTOCOL.MSG_FIRE, x: lastAim.x, y: lastAim.y }));
     }

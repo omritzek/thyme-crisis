@@ -2,7 +2,7 @@
   'use strict';
 
   var CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no I, O, 0, 1
-  var TARGET_RADIUS = 72;
+  var TARGET_RADIUS = 50; // 30% smaller than the previous 72
   var HIT_FORGIVENESS = 15;
   var HIT_HOLD_MS = 450; // how long a killed enemy stays fully visible (showing the hit sprite/flash) before it shrinks away
   var MISS_FLASH_MS = 300;
