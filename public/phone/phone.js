@@ -37,6 +37,7 @@
   var lastAim = null; // {x, y} normalized 0-1
   var lastGoodAimAt = 0;
   var sendIntervalId = null;
+  var hasCalibratedOnce = false; // only the first calibration should tell the display to start the game; recalibrating mid-game shouldn't reset it
 
   function showScreen(name) {
     screenJoin.classList.toggle('hidden', name !== 'join');
@@ -58,6 +59,7 @@
     if (sendIntervalId) { clearInterval(sendIntervalId); sendIntervalId = null; }
     baseline = null;
     lastAim = null;
+    hasCalibratedOnce = false;
     appState = 'join';
     joinError.textContent = '';
     showScreen('join');
@@ -220,6 +222,13 @@
     showScreen('play');
     if (sendIntervalId) clearInterval(sendIntervalId);
     sendIntervalId = setInterval(tick, SEND_INTERVAL_MS);
+
+    if (!hasCalibratedOnce) {
+      hasCalibratedOnce = true;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: PROTOCOL.MSG_CALIBRATED }));
+      }
+    }
   }
 
   // --- Per-tick aim computation ---

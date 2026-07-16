@@ -107,7 +107,11 @@ package.json
 - **Display client**: owns all game state — score, shots, lives, and the current
   enemy. Renders a fixed 1280×720 logical canvas with whatever image the server
   finds via `GET /api/background-image` as a cover-fit background (falls back
-  to a plain dark background if none is found). An enemy spawns on a fixed
+  to a plain dark background if none is found). Once the phone pairs, the
+  display shows a "waiting for player" overlay and doesn't spawn anything
+  until the phone finishes its *first* calibration (a `calibrated` message,
+  sent once — recalibrating later doesn't re-trigger this or reset the
+  running game). After that, an enemy spawns on a fixed
   cadence (`SPAWN_INTERVAL_MS`, 5s) at one of a handful of fixed spots
   positioned over playground features in that background (tunnel opening,
   climbing panel, dome roof, swing seat, benches — see `HIDE_SPOTS` in

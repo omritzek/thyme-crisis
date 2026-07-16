@@ -57,6 +57,7 @@
   var gameOver = false;
   var gameOverAt = 0;
   var paired = false;
+  var calibrated = false; // the phone has finished its first calibration -- enemies only start spawning after this
 
   // Background image — whatever's sitting in public/display/assets/ (any
   // name, doesn't have to be exactly "playground.jpg"). Falls back to a
@@ -158,6 +159,8 @@
   }
 
   function updateGame(now) {
+    if (!calibrated) return;
+
     if (gameOver) {
       if (now - gameOverAt >= GAME_OVER_DISPLAY_MS) startNewGame(now);
       return;
@@ -194,7 +197,7 @@
   }
 
   function handleFire(msg) {
-    if (gameOver) return;
+    if (!calibrated || gameOver) return;
     shots++;
     var px = msg.x * W;
     var py = msg.y * H;
@@ -225,9 +228,17 @@
 
       if (msg.type === PROTOCOL.MSG_PHONE_CONNECTED) {
         ws.send(JSON.stringify({ type: PROTOCOL.MSG_SESSION_READY }));
-        startNewGame(performance.now());
+        calibrated = false;
+        score = 0;
+        shots = 0;
+        lives = STARTING_LIVES;
+        target = null;
         showGame();
+      } else if (msg.type === PROTOCOL.MSG_CALIBRATED) {
+        calibrated = true;
+        startNewGame(performance.now());
       } else if (msg.type === PROTOCOL.MSG_PEER_DISCONNECTED) {
+        calibrated = false;
         showPairing();
       } else if (msg.type === PROTOCOL.MSG_AIM) {
         crosshair.x = msg.x * W;
@@ -427,6 +438,21 @@
     ctx.fillText('Next mission starting soon…', W / 2, H / 2 + 74);
   }
 
+  function drawWaitingForCalibration() {
+    if (calibrated) return;
+    ctx.fillStyle = 'rgba(10, 10, 6, 0.6)';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.textAlign = 'center';
+    ctx.font = '900 40px "Arial Black", Arial, sans-serif';
+    ctx.fillStyle = '#ded9c4';
+    ctx.fillText('WAITING FOR PLAYER', W / 2, H / 2 - 10);
+
+    ctx.font = '18px -apple-system, Helvetica, Arial, sans-serif';
+    ctx.fillStyle = '#a29d87';
+    ctx.fillText('Calibrate your phone to begin', W / 2, H / 2 + 28);
+  }
+
   function drawCrosshair() {
     if (!crosshair.visible) return;
     var x = crosshair.x, y = crosshair.y;
@@ -482,6 +508,7 @@
     drawCrosshair();
     drawDamageFlash(now);
     drawHud();
+    if (paired) drawWaitingForCalibration();
     drawGameOver();
     requestAnimationFrame(render);
   }

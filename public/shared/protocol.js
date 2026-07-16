@@ -8,6 +8,7 @@ var PROTOCOL = {
   MSG_DISPLAY_CONNECTED: 'display_connected',
   MSG_PEER_DISCONNECTED: 'peer_disconnected',
   MSG_SESSION_ERROR: 'session_error',
+  MSG_CALIBRATED: 'calibrated', // sent once, the first time the phone finishes calibration
 
   LOGICAL_WIDTH: 1280,
   LOGICAL_HEIGHT: 720
