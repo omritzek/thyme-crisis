@@ -86,15 +86,20 @@ package.json
   phone per session code and relays JSON messages between them — it holds no game
   state. Every connection attempt and its outcome is logged to the terminal, which
   is the fastest way to debug a pairing that won't complete.
-- **Display client**: owns all game state — the target's position, score, and shot
-  count. Renders a fixed 1280×720 logical canvas with `assets/playground.jpg` as a
+- **Display client**: owns all game state — score, shots, lives, and the current
+  enemy. Renders a fixed 1280×720 logical canvas with `assets/playground.jpg` as a
   cover-fit background (falls back to a plain dark background if that file isn't
-  present). The target pops up at one of a handful of fixed spots positioned over
-  playground features in that background (tunnel opening, climbing panel, dome
-  roof, swing seat, benches — see `HIDE_SPOTS` in `display.js`), stays briefly,
-  then ducks back down and reappears elsewhere. It resolves hits/misses when it
-  receives `fire` messages (only while the target is fully popped up) and renders
-  a live crosshair from `aim` messages.
+  present). An enemy spawns on a fixed cadence (`SPAWN_INTERVAL_MS`, 5s) at one of
+  a handful of fixed spots positioned over playground features in that background
+  (tunnel opening, climbing panel, dome roof, swing seat, benches — see
+  `HIDE_SPOTS` in `display.js`). Each enemy has a fixed window
+  (`ENEMY_LIFETIME_MS`, 3s) to be shot: a `fire` message landing within its hit
+  radius while it's up kills it (+1 score); if that window expires first, it
+  fires back instead — the player loses a life (with a muzzle-flash effect at the
+  enemy and a red screen flash), and the enemy ducks down either way. Losing all
+  starting lives (`STARTING_LIVES`, 3) shows a **GAME OVER** overlay with the
+  final score, then auto-restarts after a few seconds. Also renders a live
+  crosshair from `aim` messages.
 - **Phone client**: on pairing, requests motion sensor access
   (`DeviceOrientationEvent.requestPermission()` on iOS 13+; no prompt needed on
   most Android browsers). Raw `alpha`/`beta`/`gamma` readings are smoothed with an

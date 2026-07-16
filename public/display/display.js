@@ -7,7 +7,7 @@
   var HIT_FLASH_MS = 150;
   var MISS_FLASH_MS = 300;
 
-  // Fixed spots (as fractions of the canvas) where the target pops up from —
+  // Fixed spots (as fractions of the canvas) where enemies pop up from —
   // picked to line up with playground features in the background image
   // (tunnel slide opening, climbing panel, dome roof, swing seat, benches).
   // Nudge these if they don't quite land on the right spot once the actual
@@ -22,10 +22,12 @@
   ];
   var POP_UP_MS = 180;
   var POP_DOWN_MS = 150;
-  var VISIBLE_MIN_MS = 2200;
-  var VISIBLE_MAX_MS = 3600;
-  var HIDDEN_MIN_MS = 500;
-  var HIDDEN_MAX_MS = 1200;
+  var SPAWN_INTERVAL_MS = 5000; // a new enemy appears on this fixed cadence
+  var ENEMY_LIFETIME_MS = 3000; // an enemy has this long to be shot before it fires back
+  var STARTING_LIVES = 3;
+  var DAMAGE_FLASH_MS = 400;
+  var ENEMY_MUZZLE_FLASH_MS = 350;
+  var GAME_OVER_DISPLAY_MS = 4500;
 
   var pairingEl = document.getElementById('pairing');
   var stageEl = document.getElementById('stage');
@@ -43,12 +45,17 @@
 
   var score = 0;
   var shots = 0;
+  var lives = STARTING_LIVES;
   var target = null;
   var lastSpotIndex = -1;
-  var nextPopAt = 0;
+  var nextSpawnAt = 0;
   var crosshair = { x: W / 2, y: H / 2, visible: false };
   var missFlashes = [];
+  var muzzleFlashes = []; // enemy fired-back effects, at the enemy's position
   var hitFlashUntil = 0;
+  var damageFlashUntil = 0;
+  var gameOver = false;
+  var gameOverAt = 0;
   var paired = false;
 
   var bgImage = new Image();
@@ -82,11 +89,17 @@
     stageEl.classList.remove('hidden');
   }
 
-  function scheduleNextPop(now, delayMs) {
-    nextPopAt = now + delayMs;
+  function startNewGame(now) {
+    score = 0;
+    shots = 0;
+    lives = STARTING_LIVES;
+    gameOver = false;
+    target = null;
+    lastSpotIndex = -1;
+    nextSpawnAt = now + 1000;
   }
 
-  function popUpTarget(now) {
+  function spawnEnemy(now) {
     var idx;
     do {
       idx = Math.floor(Math.random() * HIDE_SPOTS.length);
@@ -99,7 +112,8 @@
       r: TARGET_RADIUS,
       state: 'popping-up',
       stateStartedAt: now,
-      visibleUntil: 0
+      firesAt: now + ENEMY_LIFETIME_MS,
+      resolved: false
     };
   }
 
@@ -110,35 +124,55 @@
     return 1;
   }
 
-  function updateTarget(now) {
-    if (!target) {
-      if (now >= nextPopAt) popUpTarget(now);
+  function updateGame(now) {
+    if (gameOver) {
+      if (now - gameOverAt >= GAME_OVER_DISPLAY_MS) startNewGame(now);
       return;
     }
+
+    // A new enemy appears on a fixed cadence, independent of whatever
+    // happened to the previous one — with a 5s interval and a 3s enemy
+    // lifetime there's always a clear gap between one resolving and the
+    // next appearing, so only one is ever on screen at a time.
+    if (now >= nextSpawnAt) {
+      nextSpawnAt = now + SPAWN_INTERVAL_MS;
+      if (!target) spawnEnemy(now);
+    }
+
+    if (!target) return;
+
     if (target.state === 'popping-up' && now - target.stateStartedAt >= POP_UP_MS) {
       target.state = 'visible';
-      target.stateStartedAt = now;
-      target.visibleUntil = now + VISIBLE_MIN_MS + Math.random() * (VISIBLE_MAX_MS - VISIBLE_MIN_MS);
-    } else if (target.state === 'visible' && now >= target.visibleUntil) {
+    } else if (target.state === 'visible' && !target.resolved && now >= target.firesAt) {
+      // not shot in time -- the enemy fires back
+      target.resolved = true;
       target.state = 'popping-down';
       target.stateStartedAt = now;
+      muzzleFlashes.push({ x: target.x, y: target.y, expire: now + ENEMY_MUZZLE_FLASH_MS });
+      damageFlashUntil = now + DAMAGE_FLASH_MS;
+      lives--;
+      if (lives <= 0) {
+        gameOver = true;
+        gameOverAt = now;
+      }
     } else if (target.state === 'popping-down' && now - target.stateStartedAt >= POP_DOWN_MS) {
       target = null;
-      scheduleNextPop(now, HIDDEN_MIN_MS + Math.random() * (HIDDEN_MAX_MS - HIDDEN_MIN_MS));
     }
   }
 
   function handleFire(msg) {
+    if (gameOver) return;
     shots++;
     var px = msg.x * W;
     var py = msg.y * H;
     var now = performance.now();
-    if (target && target.state === 'visible') {
+    if (target && target.state === 'visible' && !target.resolved) {
       var dx = px - target.x;
       var dy = py - target.y;
       var dist = Math.sqrt(dx * dx + dy * dy);
       if (dist <= target.r + HIT_FORGIVENESS) {
         score++;
+        target.resolved = true;
         hitFlashUntil = now + HIT_FLASH_MS;
         target.state = 'popping-down';
         target.stateStartedAt = now;
@@ -158,11 +192,7 @@
 
       if (msg.type === PROTOCOL.MSG_PHONE_CONNECTED) {
         ws.send(JSON.stringify({ type: PROTOCOL.MSG_SESSION_READY }));
-        score = 0;
-        shots = 0;
-        target = null;
-        lastSpotIndex = -1;
-        scheduleNextPop(performance.now(), 300);
+        startNewGame(performance.now());
         showGame();
       } else if (msg.type === PROTOCOL.MSG_PEER_DISCONNECTED) {
         showPairing();
@@ -285,6 +315,47 @@
     });
   }
 
+  function drawMuzzleFlashes(now) {
+    muzzleFlashes = muzzleFlashes.filter(function (m) { return m.expire > now; });
+    muzzleFlashes.forEach(function (m) {
+      var t = (m.expire - now) / ENEMY_MUZZLE_FLASH_MS; // 1 -> 0 over the effect's life
+      var radius = 46 * (1 - t) + 10;
+      ctx.beginPath();
+      ctx.arc(m.x, m.y, radius, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255, 140, 26, ' + (0.55 * t) + ')';
+      ctx.fill();
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(255, 200, 120, ' + t + ')';
+      ctx.stroke();
+    });
+  }
+
+  function drawDamageFlash(now) {
+    if (now >= damageFlashUntil) return;
+    var t = (damageFlashUntil - now) / DAMAGE_FLASH_MS;
+    ctx.fillStyle = 'rgba(216, 40, 30, ' + (0.4 * t) + ')';
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  function drawGameOver() {
+    if (!gameOver) return;
+    ctx.fillStyle = 'rgba(10, 10, 6, 0.72)';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.textAlign = 'center';
+    ctx.font = '900 72px "Arial Black", Arial, sans-serif';
+    ctx.fillStyle = '#d84a3a';
+    ctx.fillText('GAME OVER', W / 2, H / 2 - 20);
+
+    ctx.font = '28px -apple-system, Helvetica, Arial, sans-serif';
+    ctx.fillStyle = '#ded9c4';
+    ctx.fillText('Final Score: ' + score, W / 2, H / 2 + 34);
+
+    ctx.font = '16px -apple-system, Helvetica, Arial, sans-serif';
+    ctx.fillStyle = '#a29d87';
+    ctx.fillText('Next mission starting soon…', W / 2, H / 2 + 74);
+  }
+
   function drawCrosshair() {
     if (!crosshair.visible) return;
     var x = crosshair.x, y = crosshair.y;
@@ -305,7 +376,7 @@
 
   function drawHud() {
     var accuracy = shots > 0 ? Math.round((score / shots) * 100) : 0;
-    var text = 'Score: ' + score + '    Shots: ' + shots + '    Accuracy: ' + accuracy + '%';
+    var text = 'Lives: ' + Math.max(0, lives) + '    Score: ' + score + '    Shots: ' + shots + '    Accuracy: ' + accuracy + '%';
     ctx.font = '24px -apple-system, Helvetica, Arial, sans-serif';
     ctx.textAlign = 'center';
     var textWidth = ctx.measureText(text).width;
@@ -330,14 +401,17 @@
   function render() {
     var now = performance.now();
 
-    if (paired) updateTarget(now);
+    if (paired) updateGame(now);
 
     ctx.clearRect(0, 0, W, H);
     drawBackground();
     drawTarget(now);
+    drawMuzzleFlashes(now);
     drawMissFlashes(now);
     drawCrosshair();
+    drawDamageFlash(now);
     drawHud();
+    drawGameOver();
     requestAnimationFrame(render);
   }
 
