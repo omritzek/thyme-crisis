@@ -142,44 +142,85 @@
     if (!target) return;
     var flashing = now < hitFlashUntil;
     var facingRight = target.vx >= 0;
-    var bodyColor = flashing ? '#ffffff' : '#f6c744';
-    var billColor = flashing ? '#ffffff' : '#e8811a';
     var r = target.r;
     var dir = facingRight ? 1 : -1;
 
+    var skin = flashing ? '#ffffff' : '#d9a066';
+    var skinShade = flashing ? '#eeeeee' : '#b9824f';
+    var hair = flashing ? '#ffffff' : '#4a3728';
+    var hairShade = flashing ? '#eeeeee' : '#332319';
+
     ctx.save();
     ctx.translate(target.x, target.y);
+    ctx.scale(dir, 1); // mirror the whole face toward the direction of travel
 
-    // body
+    // faceted low-poly head silhouette: skin (lower/front) + hair (upper/back)
     ctx.beginPath();
-    ctx.ellipse(0, 0, r * 1.05, r * 0.72, 0, 0, Math.PI * 2);
-    ctx.fillStyle = bodyColor;
-    ctx.fill();
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = '#8a6a12';
-    ctx.stroke();
-
-    // head
-    ctx.beginPath();
-    ctx.arc(dir * r * 0.62, -r * 0.45, r * 0.48, 0, Math.PI * 2);
-    ctx.fillStyle = bodyColor;
-    ctx.fill();
-    ctx.stroke();
-
-    // bill
-    ctx.beginPath();
-    ctx.moveTo(dir * r * 0.95, -r * 0.45);
-    ctx.lineTo(dir * r * 1.5, -r * 0.32);
-    ctx.lineTo(dir * r * 0.95, -r * 0.2);
+    ctx.moveTo(-r * 0.75, r * 0.05);
+    ctx.lineTo(-r * 0.55, r * 0.55);
+    ctx.lineTo(-r * 0.05, r * 0.78);
+    ctx.lineTo(r * 0.35, r * 0.62);
+    ctx.lineTo(r * 0.55, r * 0.15);
+    ctx.lineTo(r * 0.42, -r * 0.25);
+    ctx.lineTo(r * 0.05, -r * 0.55);
+    ctx.lineTo(-r * 0.4, -r * 0.5);
+    ctx.lineTo(-r * 0.72, -r * 0.2);
     ctx.closePath();
-    ctx.fillStyle = billColor;
+    ctx.fillStyle = skin;
+    ctx.fill();
+
+    // hair cap (upper-back facet)
+    ctx.beginPath();
+    ctx.moveTo(-r * 0.72, -r * 0.2);
+    ctx.lineTo(-r * 0.4, -r * 0.5);
+    ctx.lineTo(r * 0.05, -r * 0.55);
+    ctx.lineTo(r * 0.42, -r * 0.25);
+    ctx.lineTo(r * 0.15, -r * 0.85);
+    ctx.lineTo(-r * 0.45, -r * 0.8);
+    ctx.closePath();
+    ctx.fillStyle = hair;
+    ctx.fill();
+
+    // a couple of shading facets for a faceted/low-poly feel
+    ctx.beginPath();
+    ctx.moveTo(-r * 0.75, r * 0.05);
+    ctx.lineTo(-r * 0.4, -r * 0.5);
+    ctx.lineTo(-r * 0.55, r * 0.55);
+    ctx.closePath();
+    ctx.fillStyle = skinShade;
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.moveTo(-r * 0.72, -r * 0.2);
+    ctx.lineTo(-r * 0.4, -r * 0.5);
+    ctx.lineTo(-r * 0.45, -r * 0.8);
+    ctx.closePath();
+    ctx.fillStyle = hairShade;
+    ctx.fill();
+
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = flashing ? '#ffffff' : 'rgba(0,0,0,0.25)';
+    ctx.stroke();
+
+    // ear
+    ctx.beginPath();
+    ctx.ellipse(-r * 0.62, r * 0.12, r * 0.12, r * 0.18, 0, 0, Math.PI * 2);
+    ctx.fillStyle = skin;
     ctx.fill();
 
     // eye
     ctx.beginPath();
-    ctx.arc(dir * r * 0.72, -r * 0.55, r * 0.08, 0, Math.PI * 2);
-    ctx.fillStyle = '#2a2a2a';
+    ctx.arc(r * 0.12, -r * 0.05, r * 0.06, 0, Math.PI * 2);
+    ctx.fillStyle = flashing ? '#888' : '#2a2015';
     ctx.fill();
+
+    // mouth
+    ctx.beginPath();
+    ctx.moveTo(r * 0.05, r * 0.38);
+    ctx.lineTo(r * 0.3, r * 0.32);
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = flashing ? '#ccc' : '#7a4a3a';
+    ctx.stroke();
 
     ctx.restore();
   }
