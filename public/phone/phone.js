@@ -21,6 +21,8 @@
   var motionBtn = document.getElementById('motionBtn');
   var motionError = document.getElementById('motionError');
   var calibrateBtn = document.getElementById('calibrateBtn');
+  var invertPanBtn = document.getElementById('invertPanBtn');
+  var invertTiltBtn = document.getElementById('invertTiltBtn');
   var angleReadout = document.getElementById('angleReadout');
   var angleReadoutPlay = document.getElementById('angleReadoutPlay');
   var recalibrateBtn = document.getElementById('recalibrateBtn');
@@ -31,7 +33,7 @@
   var appState = 'join'; // join | connecting | motion-permission | calibrating | playing
   var ws = null;
   var latestOrientation = null; // {alpha, beta, gamma}
-  var baseline = null; // {alpha, beta}
+  var baseline = null; // {azimuth, elevation} of the pointing vector at calibration time
   var lastAim = null; // {x, y} normalized 0-1
   var lastGoodAimAt = 0;
   var sendIntervalId = null;
@@ -104,9 +106,26 @@
 
   // --- Motion sensors ---
 
+  // Raw deviceorientation readings are noisy frame-to-frame (alpha especially,
+  // since it's magnetometer-derived) — feeding that straight into the aim
+  // calculation makes the crosshair visibly jitter even when the phone is
+  // held still. Smooth it with a simple exponential moving average: each new
+  // reading nudges the tracked value toward itself rather than replacing it
+  // outright. Lower = smoother but more lag; higher = snappier but noisier.
+  var ORIENTATION_SMOOTHING = 0.2;
+
   function onOrientation(event) {
     if (event.alpha === null && event.beta === null && event.gamma === null) return;
-    latestOrientation = { alpha: event.alpha, beta: event.beta, gamma: event.gamma };
+    if (!latestOrientation) {
+      latestOrientation = { alpha: event.alpha, beta: event.beta, gamma: event.gamma };
+      return;
+    }
+    var alphaStep = angleDelta(event.alpha, latestOrientation.alpha) * ORIENTATION_SMOOTHING;
+    latestOrientation = {
+      alpha: (latestOrientation.alpha + alphaStep + 360) % 360,
+      beta: latestOrientation.beta + (event.beta - latestOrientation.beta) * ORIENTATION_SMOOTHING,
+      gamma: latestOrientation.gamma + (event.gamma - latestOrientation.gamma) * ORIENTATION_SMOOTHING
+    };
   }
 
   function requestMotionAccess() {
@@ -142,12 +161,51 @@
     return ((a - b + 540) % 360) - 180;
   }
 
+  // Raw alpha/beta/gamma Euler angles hit a real singularity (gimbal lock)
+  // exactly when the phone is held near-vertical — which is exactly the pose
+  // used to aim it at a screen. Near that pose, alpha can swing wildly or
+  // flip sign for a tiny hand movement. Instead, extract the actual 3D
+  // direction the back of the phone points (the same axis a rear camera
+  // would point down, i.e. how you'd naturally hold it like a remote aimed
+  // at the screen) and work with its azimuth/elevation. That vector stays
+  // well-behaved through the vertical pose, since the singularity for THIS
+  // axis is at pointing straight up/down, not at "held upright".
+  function toRad(deg) { return deg * Math.PI / 180; }
+  function toDeg(rad) { return rad * 180 / Math.PI; }
+
+  function pointingVector(o) {
+    var a = toRad(o.alpha), b = toRad(o.beta), g = toRad(o.gamma);
+    var ca = Math.cos(a), sa = Math.sin(a);
+    var cb = Math.cos(b), sb = Math.sin(b);
+    var cg = Math.cos(g), sg = Math.sin(g);
+    return {
+      x: -(ca * sg + cg * sa * sb),
+      y: ca * cg * sb - sa * sg,
+      z: -(cb * cg)
+    };
+  }
+
+  function azimuthElevation(v) {
+    return {
+      azimuth: toDeg(Math.atan2(v.x, v.y)),
+      elevation: toDeg(Math.atan2(v.z, Math.hypot(v.x, v.y)))
+    };
+  }
+
+  // Device/browser axis-sign conventions vary enough in practice that a
+  // fixed formula can't be guaranteed correct on every phone sight unseen —
+  // these let the player flip either axis themselves instead of needing a
+  // code change. Persisted per-device so it's a one-time fix.
+  var invertPan = localStorage.getItem('lightgun_invertPan') === '1';
+  var invertTilt = localStorage.getItem('lightgun_invertTilt') === '1';
+
   function updateCalibrateReadout() {
     if (appState !== 'calibrating') return;
     if (latestOrientation) {
       calibrateBtn.disabled = false;
+      var ae = azimuthElevation(pointingVector(latestOrientation));
       angleReadout.textContent =
-        'pan ' + latestOrientation.alpha.toFixed(1) + '°  tilt ' + latestOrientation.beta.toFixed(1) + '°';
+        'pan ' + ae.azimuth.toFixed(1) + '°  tilt ' + ae.elevation.toFixed(1) + '°';
     } else {
       calibrateBtn.disabled = true;
       angleReadout.textContent = 'waiting for sensor…';
@@ -157,7 +215,7 @@
 
   function calibrate() {
     if (!latestOrientation) return;
-    baseline = { alpha: latestOrientation.alpha, beta: latestOrientation.beta };
+    baseline = azimuthElevation(pointingVector(latestOrientation));
     appState = 'playing';
     showScreen('play');
     if (sendIntervalId) clearInterval(sendIntervalId);
@@ -173,12 +231,20 @@
   function tick() {
     if (!latestOrientation || !baseline) return;
 
-    var deltaPan = angleDelta(latestOrientation.alpha, baseline.alpha);
-    var deltaTilt = latestOrientation.beta - baseline.beta;
+    var ae = azimuthElevation(pointingVector(latestOrientation));
+    var deltaPan = angleDelta(ae.azimuth, baseline.azimuth);
+    var deltaTilt = ae.elevation - baseline.elevation;
+
+    // Derived signs (verified against the pointing-vector math): turning the
+    // phone right decreases azimuth, so aimX moves the opposite way from
+    // deltaPan by default; pointing more upward increases elevation, so
+    // aimY (0=top) also moves the opposite way from deltaTilt by default.
+    var panSign = invertPan ? 1 : -1;
+    var tiltSign = invertTilt ? 1 : -1;
 
     var aim = {
-      x: clamp01(0.5 + (deltaPan / AIM_RANGE_DEG) * 0.5),
-      y: clamp01(0.5 + (deltaTilt / AIM_RANGE_DEG) * 0.5)
+      x: clamp01(0.5 + panSign * (deltaPan / AIM_RANGE_DEG) * 0.5),
+      y: clamp01(0.5 + tiltSign * (deltaTilt / AIM_RANGE_DEG) * 0.5)
     };
     lastAim = aim;
     lastGoodAimAt = performance.now();
@@ -199,7 +265,29 @@
   retryBtn.addEventListener('click', backToJoin);
   motionBtn.addEventListener('click', requestMotionAccess);
   calibrateBtn.addEventListener('click', calibrate);
-  recalibrateBtn.addEventListener('click', calibrate);
+
+  recalibrateBtn.addEventListener('click', function () {
+    if (sendIntervalId) { clearInterval(sendIntervalId); sendIntervalId = null; }
+    appState = 'calibrating';
+    showScreen('calibrate');
+    requestAnimationFrame(updateCalibrateReadout);
+  });
+
+  function updateInvertButtonLabels() {
+    invertPanBtn.textContent = 'Pan: ' + (invertPan ? 'Inverted' : 'Normal');
+    invertTiltBtn.textContent = 'Tilt: ' + (invertTilt ? 'Inverted' : 'Normal');
+  }
+  invertPanBtn.addEventListener('click', function () {
+    invertPan = !invertPan;
+    localStorage.setItem('lightgun_invertPan', invertPan ? '1' : '0');
+    updateInvertButtonLabels();
+  });
+  invertTiltBtn.addEventListener('click', function () {
+    invertTilt = !invertTilt;
+    localStorage.setItem('lightgun_invertTilt', invertTilt ? '1' : '0');
+    updateInvertButtonLabels();
+  });
+  updateInvertButtonLabels();
 
   fireCatcher.addEventListener('pointerdown', function () {
     if (appState !== 'playing') return;

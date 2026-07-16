@@ -151,15 +151,20 @@
     <p class="hint">Hold the phone steady, aimed at the middle of the display, then tap Calibrate.</p>
     <div id="angleReadout">pan 0.0°&nbsp;&nbsp;tilt 0.0°</div>
     <button id="calibrateBtn">Calibrate</button>
+    <p class="hint">If aiming ends up backwards once you're playing, come back here (or use Recalibrate) and flip the affected axis:</p>
+    <div style="display:flex; gap:10px;">
+      <button id="invertPanBtn" style="background:#333; font-size:13px; padding:8px 14px;">Pan: Normal</button>
+      <button id="invertTiltBtn" style="background:#333; font-size:13px; padding:8px 14px;">Tilt: Normal</button>
+    </div>
   </div>
 
   <div id="playScreen">
+    <div id="fireCatcher"></div>
     <div class="reticle"></div>
     <div id="angleReadoutPlay" style="font-variant-numeric: tabular-nums; color:#6cf; font-size:13px;"></div>
     <div id="playHint">TAP ANYWHERE TO FIRE</div>
     <button id="recalibrateBtn">Recalibrate</button>
     <div id="blockedFlash"></div>
-    <div id="fireCatcher"></div>
   </div>
 
   <script src="/shared/protocol.js"></script>
