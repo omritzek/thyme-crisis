@@ -175,20 +175,28 @@ package.json
   conventions can vary by device/browser, **Invert Pan**/**Invert Tilt** toggles
   on the calibrate screen (persisted per-device) let the player fix a backwards
   axis themselves without a code change. Each tap also fires the phone's own
-  camera flash as a physical "muzzle flash" and a short vibration, if the
-  browser exposes torch control on a camera track / the Vibration API —
+  camera flash as a physical "muzzle flash," a short vibration, a brief
+  white flash across the phone's own screen, and a short synthesized "shot"
+  sound (a square-wave oscillator with a fast downward pitch sweep via the
+  Web Audio API — no audio file needed). The flash/vibration require the
+  browser to expose torch control on a camera track / the Vibration API —
   Android Chrome/Edge generally do; **iOS Safari never has** (an
-  Apple/WebKit platform restriction, not a bug here), so on iPhone the game
-  just plays without either, silently, with no extra permission prompt for
-  features that could never work there anyway. The gun holds 6 shots
-  (`AMMO_MAX`); once empty, taps do nothing but flash a "reload" hint until
-  the player tilts the phone down and holds it there briefly, triggering a
-  longer rolling vibration once it completes and resetting to a full 6.
-  Getting a phone held exactly straight down is hard in practice, so the
-  tilt check uses two thresholds rather than one: `RELOAD_TILT_TRIGGER_DEG`
-  (30° below baseline) starts the hold, but once started only rising back
-  above the looser `RELOAD_TILT_CANCEL_DEG` (15°) cancels it — ordinary hand
-  wobble mid-hold doesn't reset your progress.
+  Apple/WebKit platform restriction, not a bug here), so on iPhone those two
+  just don't happen, silently, with no extra permission prompt for features
+  that could never work there anyway (the screen flash and sound work
+  everywhere, including iOS). The gun holds 6 shots (`AMMO_MAX`); once
+  empty, taps do nothing but flash a "reload" hint until the player tilts
+  the phone down and holds it there briefly, triggering a longer rolling
+  vibration once it completes and resetting to a full 6. Getting a phone
+  held exactly straight down is hard in practice, so the tilt check uses two
+  thresholds rather than one: `RELOAD_TILT_TRIGGER_DEG` (30° below baseline)
+  starts the hold, but once started only rising back above the looser
+  `RELOAD_TILT_CANCEL_DEG` (15°) cancels it — ordinary hand wobble mid-hold
+  doesn't reset your progress. While a player's ammo is empty, the display
+  shows a "Player N - Out of Ammo" banner in that player's color (stacked
+  one per line if more than one player is empty at once), driven by an
+  `ammo_status` message each phone sends on every empty/reload transition —
+  each phone only knows its own ammo, so the display has to be told.
 
 ## Deploying it publicly
 

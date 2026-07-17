@@ -185,6 +185,7 @@
       p.score = 0;
       p.shots = 0;
       p.out = false;
+      p.outOfAmmo = false;
     });
   }
 
@@ -358,7 +359,7 @@
       if (msg.type === PROTOCOL.MSG_PLAYER_JOINED) {
         var joinedId = msg.playerId;
         if (!players.has(joinedId)) {
-          players.set(joinedId, { color: playerColor(joinedId), lives: STARTING_LIVES, score: 0, shots: 0, out: false });
+          players.set(joinedId, { color: playerColor(joinedId), lives: STARTING_LIVES, score: 0, shots: 0, out: false, outOfAmmo: false });
         }
         crosshairs.set(joinedId, { x: W / 2, y: H / 2, visible: false });
         showGame();
@@ -377,11 +378,15 @@
           calibratedPlayer.score = 0;
           calibratedPlayer.shots = 0;
           calibratedPlayer.out = false;
+          calibratedPlayer.outOfAmmo = false;
         }
         if (!roundStarted) {
           roundStarted = true;
           startNewGame(gameNow());
         }
+      } else if (msg.type === PROTOCOL.MSG_AMMO_STATUS) {
+        var ammoPlayer = players.get(msg.playerId);
+        if (ammoPlayer) ammoPlayer.outOfAmmo = !!msg.empty;
       } else if (msg.type === PROTOCOL.MSG_AIM) {
         var aiming = crosshairs.get(msg.playerId);
         if (aiming) {
@@ -677,6 +682,27 @@
     });
   }
 
+  function drawAmmoWarnings() {
+    var outOfAmmoPlayers = Array.from(players.entries())
+      .filter(function (entry) { return entry[1].outOfAmmo && !entry[1].out; })
+      .sort(function (a, b) { return a[0] - b[0]; });
+    if (!outOfAmmoPlayers.length) return;
+
+    ctx.textAlign = 'center';
+    ctx.font = '900 22px "Arial Black", Arial, sans-serif';
+    var startY = 80;
+    outOfAmmoPlayers.forEach(function (entry, i) {
+      var pid = entry[0], p = entry[1];
+      var text = 'Player ' + pid + ' - Out of Ammo';
+      var y = startY + i * 32;
+      var tw = ctx.measureText(text).width;
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx.fillRect(W / 2 - tw / 2 - 14, y - 22, tw + 28, 30);
+      ctx.fillStyle = p.color;
+      ctx.fillText(text, W / 2, y);
+    });
+  }
+
   function drawBackground() {
     if (bgReady) {
       var scale = Math.max(W / bgImage.naturalWidth, H / bgImage.naturalHeight);
@@ -703,6 +729,7 @@
     drawCrosshairs();
     drawDamageFlash(now);
     drawHud();
+    drawAmmoWarnings();
     if (paired) drawWaitingForCalibration();
     drawRoundEndOverlay();
     requestAnimationFrame(render);

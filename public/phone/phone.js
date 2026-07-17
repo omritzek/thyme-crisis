@@ -45,6 +45,7 @@
   var recalibrateBtn = document.getElementById('recalibrateBtn');
   var fireCatcher = document.getElementById('fireCatcher');
   var blockedFlash = document.getElementById('blockedFlash');
+  var fireFlash = document.getElementById('fireFlash');
   var ammoReadout = document.getElementById('ammoReadout');
   var playHint = document.getElementById('playHint');
   var screenWaiting = document.getElementById('screenWaiting');
@@ -201,6 +202,42 @@
     if (navigator.vibrate) navigator.vibrate(pattern);
   }
 
+  // --- Screen flash + shot sound on fire ---
+  var FIRE_SCREEN_FLASH_MS = 100;
+
+  function flashScreenWhite() {
+    fireFlash.style.display = 'block';
+    setTimeout(function () { fireFlash.style.display = 'none'; }, FIRE_SCREEN_FLASH_MS);
+  }
+
+  // A short synthesized "pew" (a square-wave oscillator with a fast downward
+  // pitch sweep) rather than a shipped audio file, so no sound asset needs
+  // to exist in the repo for this to work. Unlike the torch/vibration APIs,
+  // Web Audio is supported on iOS Safari too. AudioContext is created lazily
+  // on the first shot, since browsers require it to start from within a
+  // user-gesture call stack (a synthetic page-load call would be blocked).
+  var audioCtx = null;
+
+  function playShotSound() {
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      var t0 = audioCtx.currentTime;
+      var osc = audioCtx.createOscillator();
+      var gain = audioCtx.createGain();
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(900, t0);
+      osc.frequency.exponentialRampToValueAtTime(120, t0 + 0.09);
+      gain.gain.setValueAtTime(0.25, t0);
+      gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.1);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start(t0);
+      osc.stop(t0 + 0.1);
+    } catch (e) {
+      // Sound is a nice-to-have, not required for gameplay -- fail silently.
+    }
+  }
+
   // --- Camera torch flash on fire ---
   // A real LED flash on each shot reads as a much more tactile "gunshot"
   // than a screen effect. This only works where the browser exposes torch
@@ -342,6 +379,11 @@
       playHint.textContent = 'TAP ANYWHERE TO FIRE';
       playHint.classList.remove('reload-hint');
     }
+    // Lets the display show a shared "Player N - Out of Ammo" banner --
+    // each phone only knows its own ammo, so the display has to be told.
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: PROTOCOL.MSG_AMMO_STATUS, empty: ammo <= 0 }));
+    }
   }
 
   function enterPlayingState() {
@@ -466,6 +508,8 @@
     updateAmmoUi();
     flashTorch();
     vibrate(FIRE_VIBRATE_MS);
+    flashScreenWhite();
+    playShotSound();
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: PROTOCOL.MSG_FIRE, x: lastAim.x, y: lastAim.y }));
     }

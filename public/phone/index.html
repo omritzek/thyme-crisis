@@ -143,6 +143,13 @@
     display: none;
     pointer-events: none;
   }
+  #fireFlash {
+    position: absolute;
+    inset: 0;
+    background: rgba(255, 255, 255, 0.85);
+    display: none;
+    pointer-events: none;
+  }
 
   #playerBadge {
     position: fixed;
@@ -226,6 +233,7 @@
     <div id="playHint">TAP ANYWHERE TO FIRE</div>
     <button id="recalibrateBtn" class="tc-btn">Recalibrate</button>
     <div id="blockedFlash"></div>
+    <div id="fireFlash"></div>
   </div>
 
   <div id="screenWaiting" class="screen hidden">

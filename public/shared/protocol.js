@@ -7,6 +7,7 @@ var PROTOCOL = {
   MSG_PEER_DISCONNECTED: 'peer_disconnected',
   MSG_SESSION_ERROR: 'session_error',
   MSG_CALIBRATED: 'calibrated', // sent once, the first time the phone finishes calibration
+  MSG_AMMO_STATUS: 'ammo_status', // phone -> display, sent on empty/reload transitions: { empty }
 
   // --- Multiplayer (up to PLAYER_COLORS.length phones per session) ---
   MSG_PLAYER_ASSIGNED: 'player_assigned', // server -> phone, once, right after it joins: { playerId }
