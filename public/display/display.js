@@ -126,6 +126,37 @@
     })
     .catch(function (err) { console.error('[sprites] fetch failed:', err); });
 
+  // Optional looping background music — whatever's sitting in
+  // public/display/assets/music/. Browsers block audio autoplay before any
+  // user interaction with the page, so a blocked first attempt is expected
+  // and not an error: this just waits for the first click/keypress/tap
+  // anywhere on the page and retries once, which satisfies every major
+  // browser's autoplay policy. Silently does nothing if no track is found.
+  var soundtrack = new Audio();
+  soundtrack.loop = true;
+  soundtrack.volume = 0.35;
+  soundtrack.onerror = function () { console.error('[soundtrack] audio failed to load:', soundtrack.src); };
+
+  function unlockSoundtrackOnFirstInteraction() {
+    function tryPlay() {
+      soundtrack.play().catch(function () {});
+    }
+    tryPlay();
+    ['pointerdown', 'keydown'].forEach(function (evt) {
+      window.addEventListener(evt, tryPlay, { once: true });
+    });
+  }
+
+  fetch('/api/soundtrack')
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      console.log('[soundtrack] /api/soundtrack ->', data);
+      if (!data.url) return;
+      soundtrack.src = data.url;
+      unlockSoundtrackOnFirstInteraction();
+    })
+    .catch(function (err) { console.error('[soundtrack] fetch failed:', err); });
+
   function generateSessionCode() {
     var code = '';
     for (var i = 0; i < 4; i++) {

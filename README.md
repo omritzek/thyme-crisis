@@ -72,7 +72,7 @@ Find your computer's LAN IP with `ipconfig getifaddr en0` (macOS), `hostname -I`
 (Linux), or `ipconfig` (Windows) — or just read it from the server's startup log,
 which prints every LAN address it's reachable on.
 
-## Customizing the visuals
+## Customizing the visuals and music
 
 - **Background**: drop an image directly in `public/display/assets/` — any
   filename, any of `.png`/`.jpg`/`.jpeg`/`.webp`. See
@@ -84,10 +84,16 @@ which prints every LAN address it's reachable on.
   asks the server what's in that folder on load, and picks a random one per
   spawn if there's more than one. Falls back to a built-in drawn face if the
   folder is empty.
+- **Soundtrack**: drop an MP3 (or OGG/WAV) into `public/display/assets/music/`
+  — see `public/display/assets/music/README.md`. The display loops it as
+  background music, starting as soon as the first click/tap/key press
+  anywhere on the page satisfies the browser's autoplay policy. Falls back to
+  no music if nothing's there.
 
-Both are auto-detected by the server (`GET /api/background-image` and
-`GET /api/enemy-sprites`) — you never need to edit code or update a filename
-in `display.js` to swap art.
+All three are auto-detected by the server (`GET /api/background-image`,
+`GET /api/enemy-sprites`, `GET /api/soundtrack`) by sniffing the actual file
+bytes, not trusting filenames or extensions — you never need to edit code or
+use a specific filename to swap any of it out.
 
 ## Project structure
 
@@ -101,6 +107,7 @@ in `display.js` to swap art.
     /assets
       *.jpg/png       # background image, any filename (not checked in by default — see assets/README.md)
       /enemies        # optional enemy sprite images (see enemies/README.md) — empty folder is fine
+      /music          # optional background music track (see music/README.md) — empty folder is fine
   /phone
     index.html
     phone.js          # motion sensor calibration, aim computation, input handling

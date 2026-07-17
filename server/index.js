@@ -131,6 +131,44 @@ function stemOf(name) {
   return ext ? name.slice(0, -ext.length) : name;
 }
 
+// Same idea as the background image / enemy sprites: drop an audio file in
+// public/display/assets/music/, no code change or specific filename needed.
+// Sniffs actual bytes rather than trusting the extension, same reasoning as
+// sniffImageType -- an MP3 has no fixed magic number, so this checks for
+// either an ID3 tag (most MP3s exported by real tools have one) or a raw
+// MPEG frame sync as a fallback, alongside OGG and WAV signatures.
+const MUSIC_DIR = path.join(ASSETS_DIR, 'music');
+
+async function sniffAudioType(filePath) {
+  let handle;
+  try {
+    handle = await fs.open(filePath, 'r');
+    const buf = Buffer.alloc(12);
+    const { bytesRead } = await handle.read(buf, 0, 12, 0);
+    if (bytesRead >= 3 && buf.toString('ascii', 0, 3) === 'ID3') return 'mp3';
+    if (bytesRead >= 2 && buf[0] === 0xff && (buf[1] & 0xe0) === 0xe0) return 'mp3';
+    if (bytesRead >= 4 && buf.toString('ascii', 0, 4) === 'OggS') return 'ogg';
+    if (bytesRead >= 12 && buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WAVE') return 'wav';
+    return null;
+  } catch (err) {
+    return null;
+  } finally {
+    if (handle) await handle.close();
+  }
+}
+
+async function listAudioFiles(dirPath) {
+  let entries;
+  try {
+    entries = await fs.readdir(dirPath, { withFileTypes: true });
+  } catch (err) {
+    return [];
+  }
+  const candidates = entries.filter((e) => e.isFile());
+  const checks = await Promise.all(candidates.map((e) => sniffAudioType(path.join(dirPath, e.name))));
+  return candidates.filter((e, i) => checks[i]).map((e) => e.name);
+}
+
 app.get('/api/enemy-sprites', async (req, res) => {
   const names = await listImageFiles(ENEMY_SPRITE_DIR);
   const stemToName = new Map(names.map((n) => [stemOf(n).toLowerCase(), n]));
@@ -158,6 +196,15 @@ app.get('/api/background-image', async (req, res) => {
   const names = await listImageFiles(ASSETS_DIR);
   const match = names.sort()[0];
   res.json({ url: match ? `/display/assets/${encodeURIComponent(match)}` : null });
+});
+
+// Finds whatever audio file is sitting in public/display/assets/music/ (any
+// name, any extension or none) and the display loops it as background
+// music. Returns { url: null } (not an error) if nothing is found.
+app.get('/api/soundtrack', async (req, res) => {
+  const names = await listAudioFiles(MUSIC_DIR);
+  const match = names.sort()[0];
+  res.json({ url: match ? `/display/assets/music/${encodeURIComponent(match)}` : null });
 });
 
 app.use(express.static(path.join(__dirname, '../public')));
