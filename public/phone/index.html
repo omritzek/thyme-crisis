@@ -59,7 +59,11 @@
   .reticle {
     width: 90px;
     height: 90px;
-    border: 3px solid var(--tc-accent);
+    /* Falls back to the default theme accent until a player color is
+       assigned (set on :root as --player-color once the server confirms
+       this phone's playerId), so it always matches this player's crosshair
+       color on the display. */
+    border: 3px solid var(--player-color, var(--tc-accent));
     border-radius: 50%;
     position: relative;
     flex-shrink: 0;
@@ -73,7 +77,7 @@
   .reticle::before, .reticle::after {
     content: '';
     position: absolute;
-    background: var(--tc-accent);
+    background: var(--player-color, var(--tc-accent));
   }
   .reticle::before { left: 50%; top: -14px; width: 3px; height: 28px; transform: translateX(-50%); }
   .reticle::after { top: 50%; left: -14px; width: 28px; height: 3px; transform: translateY(-50%); }
@@ -147,6 +151,13 @@
     position: absolute;
     inset: 0;
     background: rgba(255, 255, 255, 0.85);
+    display: none;
+    pointer-events: none;
+  }
+  #outOfAmmoOverlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(200, 30, 20, 0.55);
     display: none;
     pointer-events: none;
   }
@@ -234,6 +245,7 @@
     <button id="recalibrateBtn" class="tc-btn">Recalibrate</button>
     <div id="blockedFlash"></div>
     <div id="fireFlash"></div>
+    <div id="outOfAmmoOverlay"></div>
   </div>
 
   <div id="screenWaiting" class="screen hidden">

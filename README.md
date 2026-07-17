@@ -174,7 +174,9 @@ package.json
   doesn't silently get swallowed by a one-frame reading blip. Since axis-sign
   conventions can vary by device/browser, **Invert Pan**/**Invert Tilt** toggles
   on the calibrate screen (persisted per-device) let the player fix a backwards
-  axis themselves without a code change. Each tap also fires the phone's own
+  axis themselves without a code change. Pan is inverted by default (most
+  phones/browsers tested needed it flipped) — the toggle still overrides that
+  per-device the same as before. Each tap also fires the phone's own
   camera flash as a physical "muzzle flash," a short vibration, a brief
   white flash across the phone's own screen, and a short synthesized "shot"
   sound (a square-wave oscillator with a fast downward pitch sweep via the
@@ -192,11 +194,16 @@ package.json
   thresholds rather than one: `RELOAD_TILT_TRIGGER_DEG` (30° below baseline)
   starts the hold, but once started only rising back above the looser
   `RELOAD_TILT_CANCEL_DEG` (15°) cancels it — ordinary hand wobble mid-hold
-  doesn't reset your progress. While a player's ammo is empty, the display
-  shows a "Player N - Out of Ammo" banner in that player's color (stacked
-  one per line if more than one player is empty at once), driven by an
+  doesn't reset your progress. While a player's ammo is empty, their own
+  phone screen turns solid red (impossible to miss) and the display shows a
+  "Player N - Out of Ammo" banner in that player's color (stacked one per
+  line if more than one player is empty at once), driven by an
   `ammo_status` message each phone sends on every empty/reload transition —
-  each phone only knows its own ammo, so the display has to be told.
+  each phone only knows its own ammo, so the display has to be told. The
+  aiming reticle shown on the calibrate and play screens is also colored to
+  match that player's crosshair on the display (via a `--player-color` CSS
+  variable set once the server assigns a playerId), rather than a fixed
+  color for every phone.
 
 ## Deploying it publicly
 

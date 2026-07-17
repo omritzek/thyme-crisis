@@ -46,6 +46,7 @@
   var fireCatcher = document.getElementById('fireCatcher');
   var blockedFlash = document.getElementById('blockedFlash');
   var fireFlash = document.getElementById('fireFlash');
+  var outOfAmmoOverlay = document.getElementById('outOfAmmoOverlay');
   var ammoReadout = document.getElementById('ammoReadout');
   var playHint = document.getElementById('playHint');
   var screenWaiting = document.getElementById('screenWaiting');
@@ -95,11 +96,16 @@
   function updatePlayerBadge() {
     if (myPlayerId === null) {
       playerBadge.classList.remove('visible');
+      document.documentElement.style.removeProperty('--player-color');
       return;
     }
-    playerBadgeDot.style.background = PROTOCOL.PLAYER_COLORS[(myPlayerId - 1) % PROTOCOL.PLAYER_COLORS.length];
+    var color = PROTOCOL.PLAYER_COLORS[(myPlayerId - 1) % PROTOCOL.PLAYER_COLORS.length];
+    playerBadgeDot.style.background = color;
     playerBadgeText.textContent = 'Player ' + myPlayerId;
     playerBadge.classList.add('visible');
+    // Drives the .reticle color via CSS (var(--player-color, ...)) so it
+    // matches this player's crosshair color on the display.
+    document.documentElement.style.setProperty('--player-color', color);
   }
 
   function backToJoin() {
@@ -351,8 +357,10 @@
   // Device/browser axis-sign conventions vary enough in practice that a
   // fixed formula can't be guaranteed correct on every phone sight unseen —
   // these let the player flip either axis themselves instead of needing a
-  // code change. Persisted per-device so it's a one-time fix.
-  var invertPan = localStorage.getItem('lightgun_invertPan') === '1';
+  // code change. Persisted per-device so it's a one-time fix. Pan defaults
+  // to inverted (most phones/browsers tested needed it flipped), so the
+  // stored value is only treated as "off" if it's explicitly '0'.
+  var invertPan = localStorage.getItem('lightgun_invertPan') !== '0';
   var invertTilt = localStorage.getItem('lightgun_invertTilt') === '1';
 
   function updateCalibrateReadout() {
@@ -372,6 +380,7 @@
   function updateAmmoUi() {
     ammoReadout.textContent = 'AMMO ' + Math.max(0, ammo) + '/' + AMMO_MAX;
     ammoReadout.classList.toggle('empty', ammo <= 0);
+    outOfAmmoOverlay.style.display = ammo <= 0 ? 'block' : 'none';
     if (ammo <= 0) {
       playHint.textContent = 'POINT PHONE DOWN TO RELOAD';
       playHint.classList.add('reload-hint');
