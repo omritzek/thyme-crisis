@@ -5,22 +5,27 @@
   var SEND_INTERVAL_MS = 50; // ~20/sec, matches the protocol's throttle target
   var FIRE_GRACE_MS = 400; // tolerate the brief sensor jitter a screen tap itself causes
 
-  // --- Ammo / reload ---
-  // Six shots, then the player has to physically reload by tilting the
-  // phone down (like lowering the muzzle) and holding it there briefly —
-  // measured relative to the calibrated baseline so it works regardless of
-  // how the phone happens to be held or where the screen sits. Two separate
-  // thresholds (rather than one) give it some hysteresis: once you've tilted
-  // far enough to start the hold, a little hand wobble back upward doesn't
-  // immediately cancel it -- only rising above the looser cancel threshold
-  // does. Getting the phone pointed exactly straight down is hard to hold
-  // steady in practice, so both thresholds are deliberately generous.
+  // --- Cover / reload ---
+  // Tilting the phone down past the calibrated baseline means "taking
+  // cover": the display treats you as safe from enemy/boss fire-back for
+  // as long as you hold it there, but you can't fire while covered either
+  // (mirrors a physical cover pedal -- duck to be safe, pop up to shoot).
+  // Holding cover for RELOAD_HOLD_MS on top of that reloads to a full
+  // magazine, so the same one physical motion means "duck to be safe" and
+  // "duck to reload" simultaneously rather than needing two gestures.
+  // Two separate tilt thresholds (rather than one) give entering/leaving
+  // cover some hysteresis: once you've tilted far enough to take cover, a
+  // little hand wobble back upward doesn't immediately expose you again --
+  // only rising above the looser cancel threshold does. Getting the phone
+  // pointed exactly straight down is hard to hold steady in practice, so
+  // both thresholds are deliberately generous.
   var AMMO_MAX = 6;
-  var RELOAD_TILT_TRIGGER_DEG = -30; // tilt this far below baseline to start the reload hold
-  var RELOAD_TILT_CANCEL_DEG = -15; // only cancel an in-progress hold if it rises back above this
-  var RELOAD_HOLD_MS = 350;
+  var COVER_TILT_TRIGGER_DEG = -30; // tilt this far below baseline to take cover
+  var COVER_TILT_CANCEL_DEG = -15; // only leave cover if it rises back above this
+  var RELOAD_HOLD_MS = 1000; // how long cover has to be held before it also reloads
   var ammo = AMMO_MAX;
-  var reloadHoldStartedAt = null;
+  var inCover = false;
+  var coverHoldStartedAt = null;
 
   // --- DOM ---
   var screenJoin = document.getElementById('screenJoin');
@@ -46,6 +51,8 @@
   var fireCatcher = document.getElementById('fireCatcher');
   var blockedFlash = document.getElementById('blockedFlash');
   var fireFlash = document.getElementById('fireFlash');
+  var hitFlash = document.getElementById('hitFlash');
+  var coverFlash = document.getElementById('coverFlash');
   var ammoReadout = document.getElementById('ammoReadout');
   var playHint = document.getElementById('playHint');
   var screenWaiting = document.getElementById('screenWaiting');
@@ -109,6 +116,9 @@
     baseline = null;
     lastAim = null;
     hasCalibratedOnce = false;
+    inCover = false;
+    coverHoldStartedAt = null;
+    coverFlash.style.display = 'none';
     myPlayerId = null;
     updatePlayerBadge();
     appState = 'join';
@@ -143,11 +153,14 @@
       } else if (msg.type === PROTOCOL.MSG_SESSION_READY) {
         appState = 'motion-permission';
         showScreen('motion');
+      } else if (msg.type === PROTOCOL.MSG_PLAYER_HIT) {
+        flashScreenRed();
       } else if (msg.type === PROTOCOL.MSG_YOU_ARE_OUT) {
         showWaitingScreen('YOU\'RE OUT', 'Spectating — waiting for the round to end.');
       } else if (msg.type === PROTOCOL.MSG_ROUND_ENDED) {
         var cleared = msg.result === 'cleared';
-        showWaitingScreen(cleared ? 'LEVEL CLEARED!' : 'GAME OVER', 'Waiting for the next round…', cleared ? 'cleared' : 'game-over');
+        var resultText = cleared ? 'LEVEL CLEARED!' : (msg.result === 'timeout' ? "TIME'S UP!" : 'GAME OVER');
+        showWaitingScreen(resultText, 'Waiting for the next round…', cleared ? 'cleared' : 'game-over');
       } else if (msg.type === PROTOCOL.MSG_ROUND_STARTED) {
         if (appState === 'waiting' && baseline) enterPlayingState();
       } else if (msg.type === PROTOCOL.MSG_PEER_DISCONNECTED) {
@@ -204,10 +217,21 @@
 
   // --- Screen flash + shot sound on fire ---
   var FIRE_SCREEN_FLASH_MS = 100;
+  var HIT_SCREEN_FLASH_MS = 1000; // matches the #hitFlash CSS animation's total duration (two 0.5s pulses)
 
   function flashScreenWhite() {
     fireFlash.style.display = 'block';
     setTimeout(function () { fireFlash.style.display = 'none'; }, FIRE_SCREEN_FLASH_MS);
+  }
+
+  function flashScreenRed() {
+    // Force a reflow before re-showing so the CSS pulse animation restarts
+    // cleanly even if triggered again while a previous flash is still
+    // fading out (e.g. hit twice in quick succession).
+    hitFlash.style.display = 'none';
+    void hitFlash.offsetWidth;
+    hitFlash.style.display = 'block';
+    setTimeout(function () { hitFlash.style.display = 'none'; }, HIT_SCREEN_FLASH_MS);
   }
 
   // A short synthesized "pew" (a square-wave oscillator with a fast downward
@@ -233,6 +257,32 @@
       gain.connect(audioCtx.destination);
       osc.start(t0);
       osc.stop(t0 + 0.1);
+    } catch (e) {
+      // Sound is a nice-to-have, not required for gameplay -- fail silently.
+    }
+  }
+
+  // Two short rising notes (a mechanical "cha-chunk" read) on reload
+  // completion -- ascending in pitch, the opposite shape from the shot's
+  // downward sweep, so the two are easy to tell apart by ear alone.
+  function playReloadSound() {
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      var t0 = audioCtx.currentTime;
+      [[260, 0], [420, 0.09]].forEach(function (note) {
+        var freq = note[0], delay = note[1];
+        var noteT0 = t0 + delay;
+        var osc = audioCtx.createOscillator();
+        var gain = audioCtx.createGain();
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(freq, noteT0);
+        gain.gain.setValueAtTime(0.2, noteT0);
+        gain.gain.exponentialRampToValueAtTime(0.001, noteT0 + 0.08);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start(noteT0);
+        osc.stop(noteT0 + 0.08);
+      });
     } catch (e) {
       // Sound is a nice-to-have, not required for gameplay -- fail silently.
     }
@@ -369,16 +419,28 @@
     requestAnimationFrame(updateCalibrateReadout);
   }
 
-  function updateAmmoUi() {
-    ammoReadout.textContent = 'AMMO ' + Math.max(0, ammo) + '/' + AMMO_MAX;
-    ammoReadout.classList.toggle('empty', ammo <= 0);
-    if (ammo <= 0) {
+  // Reflects both ammo and cover state, since which hint applies depends
+  // on both: covered players can't fire regardless of ammo, and an
+  // exposed player out of ammo needs to know to duck back down.
+  function updatePlayHint() {
+    if (inCover) {
+      playHint.textContent = ammo < AMMO_MAX ? 'IN COVER — HOLD TO RELOAD' : 'IN COVER';
+      playHint.classList.remove('reload-hint');
+      playHint.classList.add('cover-hint');
+    } else if (ammo <= 0) {
       playHint.textContent = 'POINT PHONE DOWN TO RELOAD';
+      playHint.classList.remove('cover-hint');
       playHint.classList.add('reload-hint');
     } else {
       playHint.textContent = 'TAP ANYWHERE TO FIRE';
-      playHint.classList.remove('reload-hint');
+      playHint.classList.remove('reload-hint', 'cover-hint');
     }
+  }
+
+  function updateAmmoUi() {
+    ammoReadout.textContent = 'AMMO ' + Math.max(0, ammo) + '/' + AMMO_MAX;
+    ammoReadout.classList.toggle('empty', ammo <= 0);
+    updatePlayHint();
     // Lets the display show a shared "Player N - Out of Ammo" banner --
     // each phone only knows its own ammo, so the display has to be told.
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -386,12 +448,24 @@
     }
   }
 
+  // Lets the display know whether to treat this player as vulnerable to
+  // enemy/boss fire-back (see cover state in tick()) -- sent only on
+  // change, the same edge-triggered pattern as ammo status.
+  function sendCoverStatus() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: PROTOCOL.MSG_COVER_STATUS, inCover: inCover }));
+    }
+  }
+
   function enterPlayingState() {
     appState = 'playing';
     showScreen('play');
     ammo = AMMO_MAX;
-    reloadHoldStartedAt = null;
+    inCover = false;
+    coverHoldStartedAt = null;
+    coverFlash.style.display = 'none';
     updateAmmoUi();
+    sendCoverStatus();
     if (sendIntervalId) clearInterval(sendIntervalId);
     sendIntervalId = setInterval(tick, SEND_INTERVAL_MS);
   }
@@ -422,19 +496,20 @@
     var deltaPan = angleDelta(ae.azimuth, baseline.azimuth);
     var deltaTilt = ae.elevation - baseline.elevation;
 
-    if (ammo <= 0) {
-      var cancelThreshold = reloadHoldStartedAt === null ? RELOAD_TILT_TRIGGER_DEG : RELOAD_TILT_CANCEL_DEG;
-      if (deltaTilt <= cancelThreshold) {
-        if (reloadHoldStartedAt === null) reloadHoldStartedAt = performance.now();
-        else if (performance.now() - reloadHoldStartedAt >= RELOAD_HOLD_MS) {
-          ammo = AMMO_MAX;
-          reloadHoldStartedAt = null;
-          updateAmmoUi();
-          vibrate([25, 40, 25, 40, 50]);
-        }
-      } else {
-        reloadHoldStartedAt = null;
-      }
+    var coverThreshold = inCover ? COVER_TILT_CANCEL_DEG : COVER_TILT_TRIGGER_DEG;
+    var nowInCover = deltaTilt <= coverThreshold;
+    if (nowInCover !== inCover) {
+      inCover = nowInCover;
+      coverHoldStartedAt = inCover ? performance.now() : null;
+      sendCoverStatus();
+      updatePlayHint();
+      coverFlash.style.display = inCover ? 'block' : 'none';
+    }
+    if (inCover && ammo < AMMO_MAX && performance.now() - coverHoldStartedAt >= RELOAD_HOLD_MS) {
+      ammo = AMMO_MAX;
+      updateAmmoUi();
+      vibrate([25, 40, 25, 40, 50]);
+      playReloadSound();
     }
 
     // Derived signs (verified against the pointing-vector math): turning the
@@ -493,6 +568,11 @@
 
   fireCatcher.addEventListener('pointerdown', function () {
     if (appState !== 'playing') return;
+    if (inCover) {
+      blockedFlash.style.display = 'block';
+      setTimeout(function () { blockedFlash.style.display = 'none'; }, 150);
+      return;
+    }
     if (ammo <= 0) {
       blockedFlash.style.display = 'block';
       setTimeout(function () { blockedFlash.style.display = 'none'; }, 150);

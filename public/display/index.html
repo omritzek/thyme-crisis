@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Thyme Crisis — Display</title>
+<title>Evyatime Crisis — Display</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="/shared/theme.css">
 <style>
@@ -39,12 +39,9 @@
     text-align: center;
     gap: 18px;
   }
-  #gameTitle {
-    font-size: 56px;
-  }
-  #tagline {
-    margin-top: -6px;
-    margin-bottom: 8px;
+  #startGameBtn {
+    font-size: 22px;
+    padding: 20px 48px;
   }
   #pairingPanel {
     display: flex;
@@ -116,15 +113,14 @@
 </head>
 <body>
   <div id="pairing" class="tc-backdrop">
-    <h1 id="gameTitle" class="tc-title">Thyme Crisis<span class="tc-title-sub">Light Gun Ops</span></h1>
-    <div id="tagline" class="tc-tagline">One Herb. One Mission. No Mercy.</div>
-    <div id="pairingPanel" class="tc-panel">
+    <button id="startGameBtn" class="tc-btn tc-btn-accent">Start Game</button>
+    <div id="pairingPanel" class="tc-panel hidden">
       <h2 id="pairingLabel" class="tc-label">Point your phone's browser at</h2>
       <div id="pairingUrl"></div>
       <div id="sessionCode">----</div>
       <div id="qrFrame"><img id="qrImg" alt="QR code to join"></div>
     </div>
-    <div id="pairingHint">Scan the QR code with your phone, or open the URL above and enter the code shown.</div>
+    <div id="pairingHint" class="hidden">Scan the QR code with your phone, or open the URL above and enter the code shown.</div>
   </div>
   <div id="stage" class="hidden">
     <canvas id="game" width="1280" height="720"></canvas>

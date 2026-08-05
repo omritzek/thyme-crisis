@@ -83,10 +83,13 @@ app.get('/api/qrcode', async (req, res) => {
 // change needed. Returns an empty list (not an error) if the folder is
 // missing or empty; the display falls back to its built-in drawn sprite.
 //
-// A file named "<name>-hit" (with or without an extension) is treated as
-// the hit-reaction pose for the base sprite "<name>" and paired with it
-// rather than listed as its own independent spawnable sprite. A "-hit"
-// file with no matching base file is just ignored.
+// A file named "<name>-hit" or "<name>-hit<N>" (e.g. "-hit1", "-hit2", with
+// or without an extension) is treated as a hit-reaction pose for the base
+// sprite "<name>" rather than listed as its own independent spawnable
+// sprite. A base sprite can have several numbered hit poses, one of which
+// is picked at random each time it's shot; a lone unnumbered "-hit" is just
+// that sprite's single pose. A "-hit" file with no matching base file is
+// just ignored.
 //
 // Files are identified as images by sniffing their actual bytes (PNG/JPEG/
 // WEBP signatures), not by trusting the filename's extension — tools like
@@ -96,6 +99,14 @@ app.get('/api/qrcode', async (req, res) => {
 // reason a player would guess.
 const ASSETS_DIR = path.join(__dirname, '../public/display/assets');
 const ENEMY_SPRITE_DIR = path.join(ASSETS_DIR, 'enemies');
+const BACKGROUND_DIR = path.join(ASSETS_DIR, 'backgrounds');
+const MENU_MUSIC_DIR = path.join(ASSETS_DIR, 'music/menu');
+const LEVEL_MUSIC_DIR = path.join(ASSETS_DIR, 'music/levels');
+const LOBBY_IMAGE_DIR = path.join(ASSETS_DIR, 'lobby');
+const INTRO_CUTSCENE_DIR = path.join(ASSETS_DIR, 'cutscenes/intro');
+const OUTRO_CUTSCENE_DIR = path.join(ASSETS_DIR, 'cutscenes/outro');
+const BOSS_SPRITE_DIR = path.join(ASSETS_DIR, 'boss');
+const BOSS_MUSIC_DIR = path.join(ASSETS_DIR, 'music/boss');
 
 async function sniffImageType(filePath) {
   let handle;
@@ -114,7 +125,28 @@ async function sniffImageType(filePath) {
   }
 }
 
-async function listImageFiles(dirPath) {
+// Same content-sniffing approach as sniffImageType, for the same reason: a
+// music file's real extension can't be trusted (exported/renamed by hand),
+// so this reads the actual header bytes instead.
+async function sniffAudioType(filePath) {
+  let handle;
+  try {
+    handle = await fs.open(filePath, 'r');
+    const buf = Buffer.alloc(12);
+    const { bytesRead } = await handle.read(buf, 0, 12, 0);
+    if (bytesRead >= 3 && buf.toString('ascii', 0, 3) === 'ID3') return 'mp3'; // ID3v2-tagged MP3
+    if (bytesRead >= 2 && buf[0] === 0xff && (buf[1] & 0xe0) === 0xe0) return 'mp3'; // untagged MP3, raw frame sync
+    if (bytesRead >= 12 && buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WAVE') return 'wav';
+    if (bytesRead >= 4 && buf.toString('ascii', 0, 4) === 'OggS') return 'ogg';
+    return null;
+  } catch (err) {
+    return null;
+  } finally {
+    if (handle) await handle.close();
+  }
+}
+
+async function listFilesBySniff(dirPath, sniffFn) {
   let entries;
   try {
     entries = await fs.readdir(dirPath, { withFileTypes: true });
@@ -122,8 +154,16 @@ async function listImageFiles(dirPath) {
     return [];
   }
   const candidates = entries.filter((e) => e.isFile());
-  const checks = await Promise.all(candidates.map((e) => sniffImageType(path.join(dirPath, e.name))));
+  const checks = await Promise.all(candidates.map((e) => sniffFn(path.join(dirPath, e.name))));
   return candidates.filter((e, i) => checks[i]).map((e) => e.name);
+}
+
+function listImageFiles(dirPath) {
+  return listFilesBySniff(dirPath, sniffImageType);
+}
+
+function listAudioFiles(dirPath) {
+  return listFilesBySniff(dirPath, sniffAudioType);
 }
 
 function stemOf(name) {
@@ -131,33 +171,133 @@ function stemOf(name) {
   return ext ? name.slice(0, -ext.length) : name;
 }
 
+const HIT_SUFFIX_RE = /-hit(\d*)$/i;
+
 app.get('/api/enemy-sprites', async (req, res) => {
   const names = await listImageFiles(ENEMY_SPRITE_DIR);
-  const stemToName = new Map(names.map((n) => [stemOf(n).toLowerCase(), n]));
 
-  const sprites = names
-    .filter((name) => !stemOf(name).toLowerCase().endsWith('-hit'))
+  // Group every "-hit"/"-hit<N>" file by its base stem, so a base sprite
+  // with several numbered poses (evyard-hit1, evyard-hit2, ...) collects
+  // them all instead of only ever pairing with one.
+  const hitsByBase = new Map(); // lowercased base stem -> [{ name, order }]
+  const baseNames = [];
+
+  names.forEach((name) => {
+    const stem = stemOf(name);
+    const match = stem.match(HIT_SUFFIX_RE);
+    if (!match) {
+      baseNames.push(name);
+      return;
+    }
+    const baseStem = stem.slice(0, match.index).toLowerCase();
+    const order = match[1] ? parseInt(match[1], 10) : 0;
+    if (!hitsByBase.has(baseStem)) hitsByBase.set(baseStem, []);
+    hitsByBase.get(baseStem).push({ name, order });
+  });
+
+  const sprites = baseNames
     .sort()
     .map((name) => {
-      const hitName = stemToName.get((stemOf(name) + '-hit').toLowerCase());
+      const hitFiles = (hitsByBase.get(stemOf(name).toLowerCase()) || [])
+        .sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
       return {
         base: `/display/assets/enemies/${encodeURIComponent(name)}`,
-        hit: hitName ? `/display/assets/enemies/${encodeURIComponent(hitName)}` : null
+        hits: hitFiles.map((h) => `/display/assets/enemies/${encodeURIComponent(h.name)}`)
       };
     });
 
   res.json({ sprites });
 });
 
-// Finds whatever background image is sitting directly in
-// public/display/assets/ (any name, any extension or none) — dropping a
-// file in there is enough, it doesn't have to be named exactly
-// "playground.jpg". Ignores the enemies/ subfolder. Returns { url: null }
-// (not an error) if nothing is found.
+// Lists whatever background image(s) are sitting in
+// public/display/assets/backgrounds/ (any name, any extension or none) —
+// dropping a file in there is enough, it doesn't have to be named exactly
+// "playground.jpg". Sorted order becomes level order: the display cycles
+// through them one per level, so dropping in a second image is all it takes
+// to give level 2 its own backdrop. Returns { urls: [] } (not an error) if
+// nothing is found.
 app.get('/api/background-image', async (req, res) => {
-  const names = await listImageFiles(ASSETS_DIR);
-  const match = names.sort()[0];
-  res.json({ url: match ? `/display/assets/${encodeURIComponent(match)}` : null });
+  const names = await listImageFiles(BACKGROUND_DIR);
+  const urls = names.sort().map((name) => `/display/assets/backgrounds/${encodeURIComponent(name)}`);
+  res.json({ urls });
+});
+
+// Lists whatever's sitting in public/display/assets/music/menu/ — the
+// lobby/pairing-screen theme. Works the same as the other asset endpoints
+// (drop a file in, no code change), except only the first one (sorted) is
+// ever used — this isn't a rotation, just "what plays on the pairing
+// screen." Returns { urls: [] } (not an error) if nothing's there; the
+// display just stays silent on that screen.
+app.get('/api/menu-music', async (req, res) => {
+  const names = await listAudioFiles(MENU_MUSIC_DIR);
+  const urls = names.sort().map((name) => `/display/assets/music/menu/${encodeURIComponent(name)}`);
+  res.json({ urls });
+});
+
+// Lists whatever's sitting in public/display/assets/music/levels/ — one
+// loopable track per level, same sorted-order-becomes-level-order and
+// wrapping-modulo scheme as /api/background-image (so dropping a second
+// track in later is enough to give level 2 its own music, no code change).
+app.get('/api/level-music', async (req, res) => {
+  const names = await listAudioFiles(LEVEL_MUSIC_DIR);
+  const urls = names.sort().map((name) => `/display/assets/music/levels/${encodeURIComponent(name)}`);
+  res.json({ urls });
+});
+
+// Same single-file convention as /api/menu-music, for the final boss level
+// -- overrides the normal per-level rotation for the whole level (taunt
+// cutscene through the fight through both ending cutscenes).
+app.get('/api/boss-music', async (req, res) => {
+  const names = await listAudioFiles(BOSS_MUSIC_DIR);
+  const sorted = names.sort();
+  const urls = sorted.length ? [`/display/assets/music/boss/${encodeURIComponent(sorted[0])}`] : [];
+  res.json({ urls });
+});
+
+// Lists whatever's sitting in public/display/assets/lobby/ — the pairing
+// screen / pre-round lobby artwork. Same single-file convention as
+// /api/menu-music: only the first one (sorted) is ever used, since this is
+// a fixed backdrop, not a rotation. Returns { url: null } (not an error) if
+// nothing's there; the lobby just falls back to its plain dark background.
+app.get('/api/lobby-image', async (req, res) => {
+  const names = await listImageFiles(LOBBY_IMAGE_DIR);
+  const sorted = names.sort();
+  const url = sorted.length ? `/display/assets/lobby/${encodeURIComponent(sorted[0])}` : null;
+  res.json({ url });
+});
+
+// Same single-file convention as /api/lobby-image, for the opening
+// villain-monologue cutscene shown once, the first time a game actually
+// starts. A separate folder (rather than reusing lobby/) since this is
+// story artwork tied to a specific scene, not a swappable backdrop.
+app.get('/api/intro-image', async (req, res) => {
+  const names = await listImageFiles(INTRO_CUTSCENE_DIR);
+  const sorted = names.sort();
+  const url = sorted.length ? `/display/assets/cutscenes/intro/${encodeURIComponent(sorted[0])}` : null;
+  res.json({ url });
+});
+
+// The two endings back to back: him crying/defeated, then the group's
+// celebration. Same sorted-order convention as backgrounds/level music --
+// whichever file sorts first is the "defeated" scene, the next is the
+// "celebration" scene (e.g. "1 - sad cyborg.png", "2 - celebration.png") --
+// rather than two separate single-file folders, since these two always
+// play as a pair.
+app.get('/api/outro-images', async (req, res) => {
+  const names = await listImageFiles(OUTRO_CUTSCENE_DIR);
+  const urls = names.sort().map((name) => `/display/assets/cutscenes/outro/${encodeURIComponent(name)}`);
+  res.json({ urls });
+});
+
+// Same single-file convention, for the final boss's in-fight sprite (a
+// transparent-background character image, unlike the cutscene art, which
+// is a full backdrop scene) -- separate from /api/enemy-sprites since the
+// boss is one specific, non-random, non-reskinnable character.
+app.get('/api/boss-sprite', async (req, res) => {
+  const names = await listImageFiles(BOSS_SPRITE_DIR);
+  const sorted = names.sort();
+  const url = sorted.length ? `/display/assets/boss/${encodeURIComponent(sorted[0])}` : null;
+  res.json({ url });
 });
 
 app.use(express.static(path.join(__dirname, '../public')));
@@ -173,7 +313,7 @@ app.use(express.static(path.join(__dirname, '../public')));
 // to just that one phone; broadcast to all phones if absent). Beyond that
 // routing, it never inspects game state.
 
-const MAX_PLAYERS = 4;
+const MAX_PLAYERS = 5;
 
 const rooms = new Map(); // session -> { display: ws|null, phones: Map<playerId, ws>, nextPlayerId: number }
 

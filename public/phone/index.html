@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Thyme Crisis — Phone</title>
+<title>Evyatime Crisis II — Phone</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <link rel="stylesheet" href="/shared/theme.css">
 <style>
@@ -129,6 +129,9 @@
   #playHint.reload-hint {
     color: var(--tc-danger);
   }
+  #playHint.cover-hint {
+    color: var(--tc-olive-light);
+  }
   #recalibrateBtn {
     position: absolute;
     top: 20px;
@@ -149,6 +152,31 @@
     background: rgba(255, 255, 255, 0.85);
     display: none;
     pointer-events: none;
+  }
+  #hitFlash {
+    position: absolute;
+    inset: 0;
+    background: rgba(216, 40, 30, 0.55);
+    display: none;
+    pointer-events: none;
+    animation: hit-flash-pulse 0.5s ease-out 2;
+  }
+  @keyframes hit-flash-pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.35; }
+    100% { opacity: 1; }
+  }
+  #coverFlash {
+    position: absolute;
+    inset: 0;
+    background: rgba(70, 200, 90, 0.28);
+    display: none;
+    pointer-events: none;
+    animation: cover-flash-pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes cover-flash-pulse {
+    0%, 100% { opacity: 0.55; }
+    50% { opacity: 1; }
   }
 
   #playerBadge {
@@ -192,7 +220,7 @@
 <body class="tc-backdrop">
 
   <div id="screenJoin" class="screen">
-    <div class="tc-header tc-title">Thyme Crisis</div>
+    <div class="tc-header tc-title">Evyatime Crisis II</div>
     <h1 class="tc-subhead">Join a session</h1>
     <input id="sessionInput" class="tc-input" maxlength="4" placeholder="CODE" autocapitalize="characters" autocomplete="off" autocorrect="off">
     <button id="joinBtn" class="tc-btn tc-btn-accent">Join</button>
@@ -234,6 +262,8 @@
     <button id="recalibrateBtn" class="tc-btn">Recalibrate</button>
     <div id="blockedFlash"></div>
     <div id="fireFlash"></div>
+    <div id="hitFlash"></div>
+    <div id="coverFlash"></div>
   </div>
 
   <div id="screenWaiting" class="screen hidden">

@@ -1,18 +1,15 @@
-Put a background image directly in this folder — any filename, any of `.png`,
-`.jpg`, `.jpeg`, `.webp` (e.g. `playground.jpg`, `ganash.png`, whatever). The
-server looks for the first image file it finds here and the display uses it
-automatically; you don't need to name it anything specific.
+Game art and audio go in one of the subfolders here — nothing loose goes
+directly in this folder anymore:
 
-It's drawn cover-fit to the game's 1280×720 canvas, so any reasonably
-landscape-oriented image works; very tall or very narrow images will get
-cropped more aggressively on one axis.
+- `backgrounds/` — level backdrops. See `backgrounds/README.md`.
+- `enemies/` — enemy character sprites. See `enemies/README.md`.
+- `music/menu/` — pairing-screen theme. See `music/menu/README.md`.
+- `music/levels/` — per-level gameplay music. See `music/levels/README.md`.
+- `music/boss/` — boss-level music override. See `music/boss/README.md`.
+- `lobby/` — pairing/pre-round lobby artwork. See `lobby/README.md`.
+- `cutscenes/intro/` — opening villain-monologue artwork. See `cutscenes/intro/README.md`.
+- `cutscenes/outro/` — the two boss-ending scenes (defeated, then celebration). See `cutscenes/outro/README.md`.
+- `boss/` — the final boss's in-fight sprite. See `boss/README.md`.
 
-If no image is here, the display falls back to a plain dark background with
-no errors — this is expected until one is added.
-
-If you add more than one image file directly in this folder (not counting
-the `enemies/` subfolder), whichever sorts first alphabetically wins — keep
-just one here to avoid ambiguity.
-
-See `enemies/README.md` for adding enemy character sprites, which work the
-same way (drop files in, no code changes).
+All of them work the same way: drop files in, no code changes needed, the
+server picks them up automatically.
