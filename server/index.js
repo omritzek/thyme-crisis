@@ -138,6 +138,10 @@ async function sniffAudioType(filePath) {
     if (bytesRead >= 2 && buf[0] === 0xff && (buf[1] & 0xe0) === 0xe0) return 'mp3'; // untagged MP3, raw frame sync
     if (bytesRead >= 12 && buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WAVE') return 'wav';
     if (bytesRead >= 4 && buf.toString('ascii', 0, 4) === 'OggS') return 'ogg';
+    // M4A/MP4 container: a 4-byte box size followed by the ASCII box type
+    // "ftyp" at offset 4 -- every MP4-family file (M4A included) starts
+    // with this file-type box.
+    if (bytesRead >= 8 && buf.toString('ascii', 4, 8) === 'ftyp') return 'm4a';
     return null;
   } catch (err) {
     return null;

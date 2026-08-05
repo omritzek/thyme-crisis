@@ -100,16 +100,16 @@ which prints every LAN address it's reachable on.
   folder is empty. A sprite named exactly `cat` is reserved — it's not a
   spawnable enemy at all, it's the decoy's own image instead of the
   built-in drawn cat shape.
-- **Menu music**: drop an `.mp3`/`.wav`/`.ogg` file into
+- **Menu music**: drop an `.mp3`/`.wav`/`.ogg`/`.m4a` file into
   `public/display/assets/music/menu/` — see
   `public/display/assets/music/menu/README.md`. Loops while the pairing
   screen is showing; silent if nothing's there.
-- **Level music**: drop `.mp3`/`.wav`/`.ogg` tracks into
+- **Level music**: drop `.mp3`/`.wav`/`.ogg`/`.m4a` tracks into
   `public/display/assets/music/levels/` — see
   `public/display/assets/music/levels/README.md`. One track is picked at
   random (not a fixed per-level mapping) each time a regular level begins;
   silent if nothing's there.
-- **Boss music**: drop a single `.mp3`/`.wav`/`.ogg` file into
+- **Boss music**: drop a single `.mp3`/`.wav`/`.ogg`/`.m4a` file into
   `public/display/assets/music/boss/` — see
   `public/display/assets/music/boss/README.md`. Overrides the normal
   per-level rotation for the entire final boss level (taunt cutscene

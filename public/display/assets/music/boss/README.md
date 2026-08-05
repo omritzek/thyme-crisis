@@ -8,7 +8,7 @@ until everyone's disconnected back to the pairing screen.
 
 ## File requirements
 
-- **Format:** `.mp3`, `.wav`, or `.ogg` (detected by the file's actual
+- **Format:** `.mp3`, `.wav`, `.ogg`, or `.m4a` (detected by the file's actual
   bytes, not its extension).
 - **Filenames:** anything, as long as the extension (or actual audio
   format) is one of the above — `boss-fight.mp3` works, so does anything

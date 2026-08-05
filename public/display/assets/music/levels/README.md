@@ -19,7 +19,7 @@ with a different track than last time.
 
 ## File requirements
 
-- **Format:** `.mp3`, `.wav`, or `.ogg` (detected by the file's actual bytes,
+- **Format:** `.mp3`, `.wav`, `.ogg`, or `.m4a` (detected by the file's actual bytes,
   not its extension).
 - **Length:** doesn't matter — it loops seamlessly-ish (a hard loop back to
   the start, no crossfade within the track itself) for as long as that level
