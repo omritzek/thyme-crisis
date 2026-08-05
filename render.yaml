@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: thyme-crisis
+    name: evyatime-crisis
     env: node
     plan: free
     buildCommand: npm install
